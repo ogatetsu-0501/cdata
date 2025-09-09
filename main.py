@@ -10,7 +10,7 @@ from PySide6.QtGui import QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QFileDialog,
-    QScrollArea, QFrame, QStatusBar, QMessageBox, QProgressDialog
+    QScrollArea, QFrame, QStatusBar, QMessageBox
 )
 from qt_material import apply_stylesheet
 from openpyxl import load_workbook
@@ -260,33 +260,13 @@ class MainWindow(QMainWindow):
         # 起動時に参照するデータを保存するための辞書を初期化します。
         self.preloaded_data: Dict[str, List[List[Any]]] = {}
         if self.current_xlsm is not None:
-            # 進捗を表示するためのダイアログを準備します。
-            progress_dialog = QProgressDialog(
-                "Excel からデータを読み込んでいます...",
-                "",
-                0,
-                2,
-                self,
-            )
-            progress_dialog.setWindowTitle("データ取得中")
-            progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-            progress_dialog.setMinimumDuration(0)
-            progress_dialog.setValue(0)
-            progress_dialog.show()
-            # ここでイベントを処理してダイアログをすぐに表示させます。
+            # マウスカーソルをぐるぐる表示にして処理中であることを示します。
+            QApplication.setOverrideCursor(QtCore.Qt.CursorShape.BusyCursor)
+            # すぐにカーソルが切り替わるようイベントを処理します。
             QApplication.processEvents()
-
-            # コールバック関数を定義し、シート読込ごとに進捗を更新します。
-            def update_progress(current: int, total: int) -> None:
-                progress_dialog.setMaximum(total)
-                progress_dialog.setValue(current)
-                QApplication.processEvents()
-
             try:
                 # Excel ファイルから指定された二つのシートを読み込みます。
-                self.preloaded_data = extract_initial_data(
-                    self.current_xlsm, update_progress
-                )
+                self.preloaded_data = extract_initial_data(self.current_xlsm)
             except Exception as e:
                 # 読み込みに失敗した場合は警告を表示し、空のデータを保持します。
                 QMessageBox.warning(
@@ -296,8 +276,8 @@ class MainWindow(QMainWindow):
                 )
                 self.preloaded_data = {}
             finally:
-                # 進捗ダイアログを閉じて画面を元に戻します。
-                progress_dialog.close()
+                # 処理終了後にカーソル表示を元に戻します。
+                QApplication.restoreOverrideCursor()
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
