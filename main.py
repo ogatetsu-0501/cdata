@@ -385,17 +385,19 @@ class MainWindow(QMainWindow):
             self.grid.setColumnStretch(i, stretch)
 
         self.widgets: Dict[str, QtWidgets.QWidget] = {}
-        # 「データ取得」ボタンと「保存」ボタンへの参照を保存する変数を用意します。
+        # 「保存」ボタンへの参照を保存する変数を用意します。
         # 初期値は何もない状態(None)とします。
-        self.fetch_button: Optional[QPushButton] = None
         self.save_button: Optional[QPushButton] = None
         self._build_from_config(self.config.get("fields", []), ncols)
 
-        # 品目番号の入力内容に応じて各ボタンの有効・無効を切り替える設定を行います。
+        # 直近に自動取得した品目番号を記録する変数を用意します。
+        self._last_fetched_item: str = ""
+
+        # 品目番号の入力内容に応じて自動でデータ取得とボタン状態の更新を行います。
         item_widget = self.widgets.get("品目番号")
         if isinstance(item_widget, QLineEdit):
-            # 入力が変わるたびに状態を更新するよう signal を接続します。
-            item_widget.textChanged.connect(self.update_button_states)
+            # 入力が変わるたびに専用の処理を呼び出します。
+            item_widget.textChanged.connect(self.on_item_no_changed)
         # 起動直後にも一度状態を確認しておきます。
         self.update_button_states()
 
@@ -533,11 +535,7 @@ class MainWindow(QMainWindow):
                     btn.setFixedWidth(w)
                 self.grid.addWidget(btn, row, grid_col_edit,
                                     1, max(1, grid_span))
-                if action == "fetch":
-                    # 「データ取得」ボタンを後で参照できるよう保存します。
-                    self.fetch_button = btn
-                    btn.clicked.connect(self.on_fetch)
-                elif action == "save":
+                if action == "save":
                     # 「保存」ボタンを後で参照できるよう保存します。
                     self.save_button = btn
                     btn.clicked.connect(self.on_save)
@@ -547,8 +545,25 @@ class MainWindow(QMainWindow):
                     btn.clicked.connect(self.close)
                 continue
 
+    def on_item_no_changed(self, text: str) -> None:
+        """品目番号の入力が変わったときの共通処理です。"""
+        # まずは保存ボタンの状態を更新します。
+        self.update_button_states()
+
+        # 前後の空白を取り除いた文字列を用意します。
+        item_no = text.strip()
+        # データファイルが設定されているかを確認します。
+        has_file = self.current_xlsm is not None
+        # 正規表現で8桁の数字のみを判定します。
+        is_item_eight_digits = re.fullmatch(r"\d{8}", item_no) is not None
+
+        # 条件を満たし、まだ同じ品目番号を読み込んでいない場合に自動で取得します。
+        if has_file and is_item_eight_digits and item_no != self._last_fetched_item:
+            self.on_fetch()
+            self._last_fetched_item = item_no
+
     def update_button_states(self) -> None:
-        """入力内容に応じて『データ取得』と『保存』のボタンを切り替えます。"""
+        """入力内容に応じて『保存』ボタンの状態を切り替えます。"""
         # 品目番号の入力欄を取り出し、未設定なら空文字として扱います。
         item_widget = self.widgets.get("品目番号")
         item_text = ""
@@ -557,15 +572,6 @@ class MainWindow(QMainWindow):
 
         # データファイルが設定されているかを確認します。
         has_file = self.current_xlsm is not None
-
-        # 正規表現を使って「8桁の数字」のみを判定します。
-        # r"\d{8}" は「半角数字が8文字続く」という意味です。
-        is_item_eight_digits = re.fullmatch(r"\d{8}", item_text) is not None
-
-        # 「データ取得」ボタンは、8桁の数字が入力され、かつデータファイルが設定されている場合のみ有効にします。
-        is_fetch_valid = is_item_eight_digits and has_file
-        if self.fetch_button is not None:
-            self.fetch_button.setEnabled(is_fetch_valid)
 
         # 「保存」ボタンは、品目番号が空でなく、かつデータファイルが設定されている場合のみ有効にします。
         is_save_valid = bool(item_text) and has_file
@@ -722,6 +728,10 @@ class MainWindow(QMainWindow):
                 continue
             if isinstance(w, (QLineEdit, QPlainTextEdit)):
                 w.clear()
+
+        # 品目番号も消した場合は自動取得の記録をリセットします。
+        if not keep_item:
+            self._last_fetched_item = ""
 
 
 def main():

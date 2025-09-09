@@ -5,24 +5,16 @@
   "grid_columns": 4,
   "font_size": 20,
   "fields": [
-      {
-        "type": "line",
-        "label": "品目番号",
-        "key": "品目番号",
+    {
+      "type": "line",
+      "label": "品目番号",
+      "key": "品目番号",
       "row": 1,
       "col": 0,
       "validator": "int",
       "min": 0,
       "max": 99999999,
       "width": 200
-    },
-    {
-      "type": "button",
-      "text": "データ取得",
-      "action": "fetch",
-      "row": 1,
-      "col": 1,
-      "width": 120
     },
 
     {
