@@ -63,8 +63,11 @@ class LoadingSpinner(QtWidgets.QDialog):
         self.indicator = _SpinnerWidget(self)
         layout.addWidget(self.indicator, alignment=QtCore.Qt.AlignCenter)
 
-        # エクセルファイルを読み込んでいることを示すラベルを追加します。
-        label = QLabel("エクセルファイル読み込み中…", self)
+        # エクセルファイルを読み込んでいることを示すラベルを、2行に分けて表示します。
+        label = QLabel("エクセルファイル\n読み込み中......", self)
+        # ラベル内の文字列を上下左右ともに中央揃えにします。
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        # ラベルをレイアウト中央に配置します。
         layout.addWidget(label, alignment=QtCore.Qt.AlignCenter)
 
 
