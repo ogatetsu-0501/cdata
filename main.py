@@ -300,6 +300,8 @@ class MainWindow(QMainWindow):
                 action = f.get("action", "")
                 btn = QPushButton(text)
                 btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+                # ボタンの色や形を一括で指定します。無効化されているときは灰色にして、
+                # 利用できない状態であることが直感的に分かるようにしています。
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         background:#2962FF;
@@ -312,6 +314,10 @@ class MainWindow(QMainWindow):
                     }}
                     QPushButton:hover {{ background:#2F6BFF; }}
                     QPushButton:pressed {{ background:#2554CC; }}
+                    QPushButton:disabled {{
+                        background:#E0E0E0;
+                        color:#9E9E9E;
+                    }}
                 """)
                 # JSONで指定された横幅を取得し、0より大きければ固定幅を設定します。
                 w = int(f.get("width", 0))
