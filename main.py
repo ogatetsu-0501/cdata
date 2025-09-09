@@ -22,16 +22,25 @@ import re
 from typing import Dict, Optional, Any
 
 
-# 数字入力専用のラインエディットです。フォーカス時に IME を無効化します。
+# 数字入力専用のラインエディットです。フォーカス時に入力モードを半角英数字に固定します。
 class NumericLineEdit(QLineEdit):
+    def __init__(self, *args, **kwargs):
+        # まずは親クラス(QLineEdit)の初期化を行います。
+        super().__init__(*args, **kwargs)
+        # フォーカス前の入力ヒントを保存するための変数を用意します。
+        self._prev_hints: Optional[QtCore.Qt.InputMethodHints] = None
+
     def focusInEvent(self, event: QtGui.QFocusEvent) -> None:
-        # この欄が選択された瞬間に IME を強制的にオフにします。
-        self.setAttribute(QtCore.Qt.WA_InputMethodEnabled, False)
+        # この欄にフォーカスが当たったときの処理です。
+        # 現在の入力ヒントを記録し、半角英数字のみになるようヒントを追加します。
+        self._prev_hints = self.inputMethodHints()
+        self.setInputMethodHints(self._prev_hints | QtCore.Qt.ImhLatinOnly)
         super().focusInEvent(event)
 
     def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
-        # 他の欄へ移動したら IME を再び使えるように戻します。
-        self.setAttribute(QtCore.Qt.WA_InputMethodEnabled, True)
+        # フォーカスが外れたときに元の入力ヒントへ戻します。
+        if self._prev_hints is not None:
+            self.setInputMethodHints(self._prev_hints)
         super().focusOutEvent(event)
 
 
@@ -242,7 +251,7 @@ class MainWindow(QMainWindow):
                         # 英語ロケールを指定して全角数字を受け付けないようにします。
                         iv.setLocale(QtCore.QLocale("C"))
                         edit.setValidator(iv)
-                        # フォーカス時に IME を無効化し、半角数字のみを受け付けます。
+                        # フォーカス時に入力モードを半角英数字に固定し、半角数字のみを受け付けます。
                         edit.setInputMethodHints(QtCore.Qt.ImhDigitsOnly)
                     elif val == "float":
                         # 小数を扱う欄なので小数用のバリデータを設定します。
@@ -254,7 +263,7 @@ class MainWindow(QMainWindow):
                         # 英語ロケールに固定して全角文字を排除します。
                         v.setLocale(QtCore.QLocale("C"))
                         edit.setValidator(v)
-                        # フォーカス時に IME を無効化し、数値と小数点のみを許可します。
+                        # フォーカス時に入力モードを半角英数字に固定し、数値と小数点のみを許可します。
                         edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
 
                 edit.setStyleSheet(f"""
