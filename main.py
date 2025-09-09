@@ -493,8 +493,26 @@ class MainWindow(QMainWindow):
 
         # 「保存」ボタンは、品目番号が空でなく、かつデータファイルが設定されている場合のみ有効にします。
         is_save_valid = bool(item_text) and has_file
+
+        # 保存ボタンに表示する文字列を決めます。既定では新規登録とします。
+        save_text = "新規登録"
+        if item_text and has_file:
+            # 事前に読み込んだデータから同じ品目番号が存在するか調べます。
+            sheet_data = self.preloaded_data.get(self.excel_sheet)
+            if sheet_data:
+                try:
+                    exists = find_record_by_column(sheet_data, "品目番号", item_text)
+                    if exists is not None:
+                        save_text = "上書き保存"
+                except Exception:
+                    # 読み込みに失敗した場合は既定の表示のままとします。
+                    pass
+
         if self.save_button is not None:
+            # 保存ボタンの有効・無効を切り替えます。
             self.save_button.setEnabled(is_save_valid)
+            # 判定結果に応じた文字列をボタンに表示します。
+            self.save_button.setText(save_text)
 
     def collect_form_data(self) -> Dict[str, str]:
         d: Dict[str, str] = {}
@@ -597,6 +615,27 @@ class MainWindow(QMainWindow):
             upsert_record_to_xlsm(self.current_xlsm, data, self.excel_sheet)
             self.status.showMessage("Excel に保存しました。", 3000)
             QMessageBox.information(self, "保存", "保存が完了しました。")
+
+            # Excel に書き込んだ内容を事前読込データにも反映させます。
+            sheet_data = self.preloaded_data.get(self.excel_sheet)
+            if sheet_data:
+                # 1 行目から列名の一覧を取得します。
+                headers = [str(v) if v is not None else "" for v in sheet_data[0]]
+                row = [data.get(h, "") for h in headers]
+                if "品目番号" in headers:
+                    idx = headers.index("品目番号")
+                    # 既存の行を探し、あれば置き換え、無ければ追加します。
+                    for i in range(1, len(sheet_data)):
+                        cell = sheet_data[i][idx]
+                        cell_text = str(cell) if cell is not None else ""
+                        if cell_text == data.get("品目番号", ""):
+                            sheet_data[i] = row
+                            break
+                    else:
+                        sheet_data.append(row)
+
+            # 保存後にボタンの表示や状態を更新します。
+            self.update_button_states()
         except Exception as e:
             QMessageBox.critical(self, "保存エラー", str(e))
 
