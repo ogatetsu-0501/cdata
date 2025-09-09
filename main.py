@@ -169,18 +169,19 @@ class MainWindow(QMainWindow):
             self.grid.setColumnStretch(i, stretch)
 
         self.widgets: Dict[str, QtWidgets.QWidget] = {}
-        # 「データ取得」ボタンへの参照を保存する変数を用意します。
+        # 「データ取得」ボタンと「保存」ボタンへの参照を保存する変数を用意します。
         # 初期値は何もない状態(None)とします。
         self.fetch_button: Optional[QPushButton] = None
+        self.save_button: Optional[QPushButton] = None
         self._build_from_config(self.config.get("fields", []), ncols)
 
-        # 品目番号の入力内容に応じてボタンの有効・無効を切り替える設定を行います。
+        # 品目番号の入力内容に応じて各ボタンの有効・無効を切り替える設定を行います。
         item_widget = self.widgets.get("品目番号")
-        if self.fetch_button is not None and isinstance(item_widget, QLineEdit):
+        if isinstance(item_widget, QLineEdit):
             # 入力が変わるたびに状態を更新するよう signal を接続します。
-            item_widget.textChanged.connect(self.update_fetch_button_state)
-            # 起動直後にも一度状態を確認しておきます。
-            self.update_fetch_button_state()
+            item_widget.textChanged.connect(self.update_button_states)
+        # 起動直後にも一度状態を確認しておきます。
+        self.update_button_states()
 
         wrap.addLayout(self.grid)
         root.addWidget(self.card)
@@ -314,6 +315,8 @@ class MainWindow(QMainWindow):
                     self.fetch_button = btn
                     btn.clicked.connect(self.on_fetch)
                 elif action == "save":
+                    # 「保存」ボタンを後で参照できるよう保存します。
+                    self.save_button = btn
                     btn.clicked.connect(self.on_save)
                 elif action == "clear":
                     btn.clicked.connect(self.on_clear)
@@ -321,19 +324,23 @@ class MainWindow(QMainWindow):
                     btn.clicked.connect(self.close)
                 continue
 
-    def update_fetch_button_state(self) -> None:
-        """品目番号の入力内容に応じて『データ取得』ボタンを有効・無効にします。"""
-        # 「データ取得」ボタンが存在しない場合は何もしません。
-        if self.fetch_button is None:
-            return
+    def update_button_states(self) -> None:
+        """入力内容に応じて『データ取得』と『保存』のボタンを切り替えます。"""
         # 品目番号の入力内容を取得します。存在しない場合は空文字とします。
         item_widget = self.widgets.get("品目番号")
         item_text = ""
         if isinstance(item_widget, QLineEdit):
             item_text = item_widget.text().strip()
-        # 入力が8桁の数字のみであればボタンを有効化し、それ以外は無効化します。
-        is_valid = len(item_text) == 8 and item_text.isdigit()
-        self.fetch_button.setEnabled(is_valid)
+        # データファイルが設定されているかを確認します。
+        has_file = self.current_xlsm is not None
+        # 「データ取得」ボタンは8桁の数字が入力されている場合のみ有効にします。
+        is_fetch_valid = len(item_text) == 8 and item_text.isdigit() and has_file
+        if self.fetch_button is not None:
+            self.fetch_button.setEnabled(is_fetch_valid)
+        # 「保存」ボタンは品目番号が空でなく、ファイルが設定されている場合のみ有効にします。
+        is_save_valid = bool(item_text) and has_file
+        if self.save_button is not None:
+            self.save_button.setEnabled(is_save_valid)
 
     def collect_form_data(self) -> Dict[str, str]:
         d: Dict[str, str] = {}
@@ -443,6 +450,16 @@ def main():
 
     app = QApplication(sys.argv)
     apply_stylesheet(app, theme="light_blue.xml")
+    # 無効状態の入力欄やボタンを灰色で表示するためのスタイルを追加します。
+    # 利用できないことが見た目で分かるようにしています。
+    app.setStyleSheet(app.styleSheet() + """
+        QLineEdit:disabled,
+        QPlainTextEdit:disabled,
+        QPushButton:disabled {
+            background-color: #E0E0E0;
+            color: #9E9E9E;
+        }
+    """)
 
     w = MainWindow(layout_path)
     w.showMaximized()  # ← 起動時に最大化
