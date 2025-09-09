@@ -19,7 +19,7 @@ import sys
 import json
 import os
 import re
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 
 
 # 数字入力専用のラインエディットです。フォーカス時に入力モードを半角英数字に固定します。
@@ -106,6 +106,64 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str) -> N
     wb.save(path)
 
 
+# === 起動時データ抽出関数 ===
+def extract_initial_data(path: str) -> Dict[str, List[List[Any]]]:
+    """指定された Excel ファイルから二つのシートのデータをまとめて取得します。"""
+    # Excel ファイル全体を開きます。
+    wb = load_workbook(path, keep_vba=True, data_only=False)
+
+    # 結果を格納する辞書を用意します。
+    result: Dict[str, List[List[Any]]] = {}
+
+    # 必要なシート名を順番に処理します。
+    for sheet in ("受注データ", "シリンダーデータ"):
+        if sheet in wb.sheetnames:
+            # 各シートから必要範囲のデータを取得します。
+            ws = wb[sheet]
+            result[sheet] = _extract_range_from_sheet(ws)
+
+    # 取得したデータを返します。
+    return result
+
+
+def _extract_range_from_sheet(ws) -> List[List[Any]]:
+    """1つのシートから必要な範囲のデータだけを取り出します。"""
+    # 列ヘッダー行の最後に入力がある列番号を求めます。
+    max_col = ws.max_column
+    while max_col > 0 and ws.cell(row=1, column=max_col).value in (None, ""):
+        max_col -= 1
+
+    # ヘッダー名と列番号の対応表を作ります。
+    header_map: Dict[str, int] = {}
+    for c in range(1, max_col + 1):
+        v = ws.cell(row=1, column=c).value
+        if v is not None:
+            header_map[str(v)] = c
+
+    # 「品目番号」と「品目番号+刷順」列の最後の入力行を確認します。
+    last_row = 1
+    for key in ("品目番号", "品目番号+刷順"):
+        col = header_map.get(key)
+        if col is None:
+            continue
+        for r in range(ws.max_row, 1, -1):
+            if ws.cell(row=r, column=col).value not in (None, ""):
+                if r > last_row:
+                    last_row = r
+                break
+
+    # 取得する範囲のセルの値を二次元リストにまとめます。
+    data: List[List[Any]] = []
+    for r in range(1, last_row + 1):
+        row_values: List[Any] = []
+        for c in range(1, max_col + 1):
+            row_values.append(ws.cell(row=r, column=c).value)
+        data.append(row_values)
+
+    # 作成したデータを返します。
+    return data
+
+
 # === マテリアル風のカード ===
 class Card(QFrame):
     def __init__(self, parent=None):
@@ -146,6 +204,21 @@ class MainWindow(QMainWindow):
                 "設定情報",
                 "データファイルが設定されていないため、読み書きは行えません。"
             )
+
+        # 起動時に参照するデータを保存するための辞書を初期化します。
+        self.preloaded_data: Dict[str, List[List[Any]]] = {}
+        if self.current_xlsm is not None:
+            try:
+                # Excel ファイルから指定された二つのシートを読み込みます。
+                self.preloaded_data = extract_initial_data(self.current_xlsm)
+            except Exception as e:
+                # 読み込みに失敗した場合は警告を表示し、空のデータを保持します。
+                QMessageBox.warning(
+                    self,
+                    "読み込みエラー",
+                    f"初期データの読み込みに失敗しました: {e}",
+                )
+                self.preloaded_data = {}
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
