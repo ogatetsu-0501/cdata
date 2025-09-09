@@ -154,7 +154,18 @@ class MainWindow(QMainWindow):
             self.grid.setColumnStretch(i, stretch)
 
         self.widgets: Dict[str, QtWidgets.QWidget] = {}
+        # 「データ取得」ボタンへの参照を保存する変数を用意します。
+        # 初期値は何もない状態(None)とします。
+        self.fetch_button: Optional[QPushButton] = None
         self._build_from_config(self.config.get("fields", []), ncols)
+
+        # 品目番号の入力内容に応じてボタンの有効・無効を切り替える設定を行います。
+        item_widget = self.widgets.get("品目番号")
+        if self.fetch_button is not None and isinstance(item_widget, QLineEdit):
+            # 入力が変わるたびに状態を更新するよう signal を接続します。
+            item_widget.textChanged.connect(self.update_fetch_button_state)
+            # 起動直後にも一度状態を確認しておきます。
+            self.update_fetch_button_state()
 
         wrap.addLayout(self.grid)
         root.addWidget(self.card)
@@ -270,6 +281,8 @@ class MainWindow(QMainWindow):
                 self.grid.addWidget(btn, row, grid_col_edit,
                                     1, max(1, grid_span))
                 if action == "fetch":
+                    # 「データ取得」ボタンを後で参照できるよう保存します。
+                    self.fetch_button = btn
                     btn.clicked.connect(self.on_fetch)
                 elif action == "save":
                     btn.clicked.connect(self.on_save)
@@ -278,6 +291,20 @@ class MainWindow(QMainWindow):
                 elif action == "close":
                     btn.clicked.connect(self.close)
                 continue
+
+    def update_fetch_button_state(self) -> None:
+        """品目番号の入力内容に応じて『データ取得』ボタンを有効・無効にします。"""
+        # 「データ取得」ボタンが存在しない場合は何もしません。
+        if self.fetch_button is None:
+            return
+        # 品目番号の入力内容を取得します。存在しない場合は空文字とします。
+        item_widget = self.widgets.get("品目番号")
+        item_text = ""
+        if isinstance(item_widget, QLineEdit):
+            item_text = item_widget.text().strip()
+        # 入力が8桁の数字のみであればボタンを有効化し、それ以外は無効化します。
+        is_valid = len(item_text) == 8 and item_text.isdigit()
+        self.fetch_button.setEnabled(is_valid)
 
     def collect_form_data(self) -> Dict[str, str]:
         d: Dict[str, str] = {}
