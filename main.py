@@ -45,7 +45,7 @@ class NumericLineEdit(QLineEdit):
         super().focusOutEvent(event)
 
 
-# === 起動時の読み込み待機ウインドウ ===
+# === 起動時のエクセル読み込み待機ウインドウ ===
 class LoadingSpinner(QtWidgets.QDialog):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         # 親クラスの初期化を行います。
@@ -63,8 +63,8 @@ class LoadingSpinner(QtWidgets.QDialog):
         self.indicator = _SpinnerWidget(self)
         layout.addWidget(self.indicator, alignment=QtCore.Qt.AlignCenter)
 
-        # 「読み込み中…」と表示するラベルを追加します。
-        label = QLabel("読み込み中…", self)
+        # エクセルファイルを読み込んでいることを示すラベルを追加します。
+        label = QLabel("エクセルファイル読み込み中…", self)
         layout.addWidget(label, alignment=QtCore.Qt.AlignCenter)
 
 
@@ -74,16 +74,18 @@ class _SpinnerWidget(QtWidgets.QWidget):
         super().__init__(parent)
         # 描画に使う角度を管理する変数を初期化します。
         self._angle = 0
-        # 一定間隔で角度を変えて描画を更新するタイマーを設定します。
+        # 線の太さを調整するための変数です。
+        self._pen_width = 8
+        # 高速でタイマーを回して滑らかに回転させます。16ms 間隔はおよそ60fpsです。
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._rotate)
-        self._timer.start(100)
+        self._timer.start(16)
         # 大きさを決めます。ここでは正方形の領域とします。
         self.setFixedSize(64, 64)
 
     def _rotate(self) -> None:
-        # 角度を少しずつ増やしていきます。360度で一周です。
-        self._angle = (self._angle + 30) % 360
+        # 角度を細かく増やして滑らかに回転させます。360度で一周です。
+        self._angle = (self._angle + 5) % 360
         # 値が変わったので再描画を依頼します。
         self.update()
 
@@ -95,8 +97,8 @@ class _SpinnerWidget(QtWidgets.QWidget):
         painter.translate(rect.center())
         # 現在の角度だけ回転させます。
         painter.rotate(self._angle)
-        radius = min(rect.width(), rect.height()) / 2 - 5
-        pen = QtGui.QPen(QtGui.QColor(100, 100, 100), 5)
+        radius = min(rect.width(), rect.height()) / 2 - self._pen_width / 2
+        pen = QtGui.QPen(QtGui.QColor(100, 100, 100), self._pen_width)
         painter.setPen(pen)
         # 270度分だけ線を描いて空白を作り、回転で動いているように見せます。
         painter.drawArc(QtCore.QRectF(-radius, -radius, radius * 2, radius * 2), 0, 270 * 16)
