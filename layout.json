@@ -1,0 +1,153 @@
+{
+  "window": { "title": "受注データ 入力フォーム（Material）" },
+  "title": "受注データ（マテリアルUI）",
+  "excel": { "sheet": "受注データ" },
+  "grid_columns": 4,
+  "fields": [
+    {
+      "type": "line",
+      "label": "品目番号",
+      "key": "品目番号",
+      "row": 1,
+      "col": 0,
+      "validator": "int",
+      "min": 0,
+      "max": 99999999
+    },
+    {
+      "type": "button",
+      "text": "データ取得",
+      "action": "fetch",
+      "row": 1,
+      "col": 1
+    },
+
+    {
+      "type": "line",
+      "label": "得意先コード",
+      "key": "得意先コード",
+      "row": 2,
+      "col": 0,
+      "validator": "int",
+      "min": 0,
+      "max": 999999
+    },
+    {
+      "type": "line",
+      "label": "得意先名",
+      "key": "得意先名",
+      "row": 2,
+      "col": 1,
+      "col_span": 2
+    },
+
+    {
+      "type": "line",
+      "label": "品名",
+      "key": "品名",
+      "row": 3,
+      "col": 0,
+      "col_span": 3
+    },
+
+    {
+      "type": "line",
+      "label": "シリンダー円周",
+      "key": "シリンダー円周",
+      "row": 4,
+      "col": 0,
+      "validator": "float",
+      "min": 0,
+      "max": 999999999,
+      "decimals": 3
+    },
+    {
+      "type": "line",
+      "label": "シリンダー寸法",
+      "key": "シリンダー寸法",
+      "row": 4,
+      "col": 1,
+      "validator": "float",
+      "min": 0,
+      "max": 999999999,
+      "decimals": 3
+    },
+
+    {
+      "type": "line",
+      "label": "仕上寸法１",
+      "key": "仕上寸法１",
+      "row": 5,
+      "col": 0,
+      "validator": "float",
+      "min": 0,
+      "max": 999999999,
+      "decimals": 3
+    },
+    {
+      "type": "line",
+      "label": "仕上寸法２",
+      "key": "仕上寸法２",
+      "row": 5,
+      "col": 1,
+      "validator": "float",
+      "min": 0,
+      "max": 999999999,
+      "decimals": 3
+    },
+
+    {
+      "type": "line",
+      "label": "原巾",
+      "key": "原巾",
+      "row": 6,
+      "col": 0,
+      "validator": "float",
+      "min": 0,
+      "max": 999999999,
+      "decimals": 3
+    },
+
+    {
+      "type": "line",
+      "label": "色数",
+      "key": "色数",
+      "row": 7,
+      "col": 0,
+      "validator": "int",
+      "min": 0,
+      "max": 99
+    },
+    {
+      "type": "line",
+      "label": "必要本数",
+      "key": "必要本数",
+      "row": 7,
+      "col": 1,
+      "validator": "int",
+      "min": 0,
+      "max": 999999999
+    },
+
+    {
+      "type": "text",
+      "label": "備考",
+      "key": "備考",
+      "row": 8,
+      "col": 0,
+      "col_span": 3,
+      "height": 160
+    },
+
+    { "type": "spacer", "row": 9, "height": 8 },
+
+    { "type": "button", "text": "保存", "action": "save", "row": 10, "col": 2 },
+    {
+      "type": "button",
+      "text": "クリア",
+      "action": "clear",
+      "row": 10,
+      "col": 3
+    }
+  ]
+}
