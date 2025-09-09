@@ -20,6 +20,7 @@ import json
 import os
 import re
 from typing import Dict, Optional, Any, List, Callable
+import threading
 
 
 # 数字入力専用のラインエディットです。フォーカス時に入力モードを半角英数字に固定します。
@@ -42,6 +43,63 @@ class NumericLineEdit(QLineEdit):
         if self._prev_hints is not None:
             self.setInputMethodHints(self._prev_hints)
         super().focusOutEvent(event)
+
+
+# === 起動時の読み込み待機ウインドウ ===
+class LoadingSpinner(QtWidgets.QDialog):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        # 親クラスの初期化を行います。
+        super().__init__(parent)
+        # 枠を消してシンプルな小窓にします。
+        self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        # 画面中央に配置されるようにサイズを固定します。
+        self.setFixedSize(120, 120)
+
+        # 縦に部品を並べるレイアウトを用意します。
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 実際にぐるぐるを描画する小さなウィジェットを追加します。
+        self.indicator = _SpinnerWidget(self)
+        layout.addWidget(self.indicator, alignment=QtCore.Qt.AlignCenter)
+
+        # 「読み込み中…」と表示するラベルを追加します。
+        label = QLabel("読み込み中…", self)
+        layout.addWidget(label, alignment=QtCore.Qt.AlignCenter)
+
+
+class _SpinnerWidget(QtWidgets.QWidget):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        # 親クラスの初期化を行います。
+        super().__init__(parent)
+        # 描画に使う角度を管理する変数を初期化します。
+        self._angle = 0
+        # 一定間隔で角度を変えて描画を更新するタイマーを設定します。
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._rotate)
+        self._timer.start(100)
+        # 大きさを決めます。ここでは正方形の領域とします。
+        self.setFixedSize(64, 64)
+
+    def _rotate(self) -> None:
+        # 角度を少しずつ増やしていきます。360度で一周です。
+        self._angle = (self._angle + 30) % 360
+        # 値が変わったので再描画を依頼します。
+        self.update()
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        # ぐるぐるの一部(円弧)を描画します。
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        rect = self.rect()
+        painter.translate(rect.center())
+        # 現在の角度だけ回転させます。
+        painter.rotate(self._angle)
+        radius = min(rect.width(), rect.height()) / 2 - 5
+        pen = QtGui.QPen(QtGui.QColor(100, 100, 100), 5)
+        painter.setPen(pen)
+        # 270度分だけ線を描いて空白を作り、回転で動いているように見せます。
+        painter.drawArc(QtCore.QRectF(-radius, -radius, radius * 2, radius * 2), 0, 270 * 16)
 
 
 # === Excel の読み書き関数 ===
@@ -260,24 +318,42 @@ class MainWindow(QMainWindow):
         # 起動時に参照するデータを保存するための辞書を初期化します。
         self.preloaded_data: Dict[str, List[List[Any]]] = {}
         if self.current_xlsm is not None:
-            # マウスカーソルをぐるぐる表示にして処理中であることを示します。
-            QApplication.setOverrideCursor(QtCore.Qt.CursorShape.BusyCursor)
-            # すぐにカーソルが切り替わるようイベントを処理します。
+            # 読み込み中であることを示す小さなウインドウを表示します。
+            spinner = LoadingSpinner(self)
+            spinner.show()
             QApplication.processEvents()
-            try:
-                # Excel ファイルから指定された二つのシートを読み込みます。
-                self.preloaded_data = extract_initial_data(self.current_xlsm)
-            except Exception as e:
-                # 読み込みに失敗した場合は警告を表示し、空のデータを保持します。
+
+            # バックグラウンドで Excel を読み込む処理を用意します。
+            container = {"data": {}, "error": None}
+
+            def load() -> None:
+                # スレッド内で Excel からデータを取得します。
+                try:
+                    container["data"] = extract_initial_data(self.current_xlsm)
+                except Exception as e:
+                    container["error"] = e
+
+            thread = threading.Thread(target=load)
+            thread.start()
+
+            # 読み込みが終わるまでイベントを処理しながら待ちます。
+            while thread.is_alive():
+                QApplication.processEvents()
+                QtCore.QThread.msleep(50)
+
+            thread.join()
+            spinner.close()
+
+            # 結果を確認し、エラーであれば知らせます。
+            if container["error"] is not None:
                 QMessageBox.warning(
                     self,
                     "読み込みエラー",
-                    f"初期データの読み込みに失敗しました: {e}",
+                    f"初期データの読み込みに失敗しました: {container['error']}",
                 )
                 self.preloaded_data = {}
-            finally:
-                # 処理終了後にカーソル表示を元に戻します。
-                QApplication.restoreOverrideCursor()
+            else:
+                self.preloaded_data = container["data"]
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
