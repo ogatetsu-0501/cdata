@@ -112,7 +112,17 @@ class MainWindow(QMainWindow):
         self.resize(int(win.get("width", 980)), int(win.get("height", 680)))
 
         self.excel_sheet = self.config.get("excel", {}).get("sheet", "受注データ")
-        self.current_xlsm: Optional[str] = None
+        # データファイルのパスを保存しておくための専用ファイルの位置を決めます。
+        self.path_store = os.path.join(os.path.dirname(layout_path), "data_file_path.txt")
+        # 既に保存済みのパスを読み込むか、無い場合はダイアログで一度だけ選んでもらいます。
+        self.current_xlsm: Optional[str] = self.load_xlsm_path()
+        # ファイルが選択されなかった場合は、後の操作ができない旨を表示します。
+        if self.current_xlsm is None:
+            QMessageBox.information(
+                self,
+                "設定情報",
+                "データファイルが設定されていないため、読み書きは行えません。"
+            )
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
@@ -286,9 +296,30 @@ class MainWindow(QMainWindow):
             elif isinstance(w, QLineEdit):
                 w.setText(v)
 
+    def load_xlsm_path(self) -> Optional[str]:
+        """保存済みのデータファイルのパスを読み込みます。"""
+        # まず保存用のテキストファイルが存在するか確認します。
+        if os.path.exists(self.path_store):
+            # ファイルがある場合は、中身を読み込んでそのまま返します。
+            with open(self.path_store, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+            if saved:
+                return saved
+        # 保存されたパスが無いときは、ダイアログで一度だけ選んでもらいます。
+        selected = self.ask_xlsm_path()
+        if selected:
+            # 選ばれたパスをファイルに書き込み、次回以降も使えるようにします。
+            with open(self.path_store, "w", encoding="utf-8") as f:
+                f.write(selected)
+            return selected
+        # 何も選ばなければ None を返します。
+        return None
+
     def ask_xlsm_path(self) -> Optional[str]:
+        """ユーザーに Excel ファイルを選んでもらうダイアログを表示します。"""
         path, _ = QFileDialog.getOpenFileName(
             self, "xlsm を選んでください", "", "Excel マクロ有効ブック (*.xlsm)")
+        # 選ばれなければ空文字が返るので、その場合は None に変換します。
         return path or None
 
     @QtCore.Slot()
@@ -299,11 +330,14 @@ class MainWindow(QMainWindow):
         if not item:
             QMessageBox.warning(self, "入力エラー", "品目番号を入力してください。")
             return
+        # 起動時にファイルが設定されていない場合は、読み込みを中止して警告します。
         if self.current_xlsm is None:
-            path = self.ask_xlsm_path()
-            if path is None:
-                return
-            self.current_xlsm = path
+            QMessageBox.warning(
+                self,
+                "設定エラー",
+                "データファイルが設定されていないため、読み込みできません。"
+            )
+            return
         try:
             rec = read_record_from_xlsm(
                 self.current_xlsm, item, self.excel_sheet)
@@ -323,11 +357,14 @@ class MainWindow(QMainWindow):
         if not data.get("品目番号"):
             QMessageBox.warning(self, "入力エラー", "品目番号は必須です。")
             return
+        # 起動時にファイルが設定されていない場合は、保存を中止して警告します。
         if self.current_xlsm is None:
-            path = self.ask_xlsm_path()
-            if path is None:
-                return
-            self.current_xlsm = path
+            QMessageBox.warning(
+                self,
+                "設定エラー",
+                "データファイルが設定されていないため、保存できません。"
+            )
+            return
         try:
             upsert_record_to_xlsm(self.current_xlsm, data, self.excel_sheet)
             self.status.showMessage("Excel に保存しました。", 3000)
