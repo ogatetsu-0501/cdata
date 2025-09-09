@@ -104,6 +104,8 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.config = self._load_layout(layout_path)
+        # JSON全体に共通の文字サイズがあれば読み込み、無ければ12を使います。
+        self.default_font_size = int(self.config.get("font_size", 12))
 
         win = self.config.get("window", {})
         self.setWindowTitle(win.get("title", "フォーム"))
@@ -165,7 +167,8 @@ class MainWindow(QMainWindow):
             grid_col_edit = col * 2 + 1
             grid_span = max(1, min(ncols - col, col_span)) * 2 - 1
 
-            font_size = f.get("font_size", 12)
+            # 各部品に設定された文字サイズを取得し、無ければ共通設定を利用します。
+            font_size = int(f.get("font_size", self.default_font_size))
 
             if ftype == "header":
                 lbl = QLabel(f.get("text", ""))
@@ -184,6 +187,7 @@ class MainWindow(QMainWindow):
 
                 if ftype == "text":
                     edit = QPlainTextEdit()
+                    # JSONで指定された高さを設定します。
                     h = int(f.get("height", 120))
                     edit.setFixedHeight(h)
                 else:
@@ -223,6 +227,10 @@ class MainWindow(QMainWindow):
                     }}
                 """)
 
+                # JSONで指定された横幅を取得し、0より大きければ固定幅を設定します。
+                w = int(f.get("width", 0))
+                if w > 0:
+                    edit.setFixedWidth(w)
                 self.grid.addWidget(edit, row, grid_col_edit, 1, grid_span)
                 self.widgets[key] = edit
                 continue
@@ -245,6 +253,10 @@ class MainWindow(QMainWindow):
                     QPushButton:hover {{ background:#2F6BFF; }}
                     QPushButton:pressed {{ background:#2554CC; }}
                 """)
+                # JSONで指定された横幅を取得し、0より大きければ固定幅を設定します。
+                w = int(f.get("width", 0))
+                if w > 0:
+                    btn.setFixedWidth(w)
                 self.grid.addWidget(btn, row, grid_col_edit,
                                     1, max(1, grid_span))
                 if action == "fetch":

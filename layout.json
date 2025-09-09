@@ -3,6 +3,7 @@
   "title": "受注データ（マテリアルUI）",
   "excel": { "sheet": "受注データ" },
   "grid_columns": 4,
+  "font_size": 14,
   "fields": [
     {
       "type": "line",
@@ -12,14 +13,16 @@
       "col": 0,
       "validator": "int",
       "min": 0,
-      "max": 99999999
+      "max": 99999999,
+      "width": 200
     },
     {
       "type": "button",
       "text": "データ取得",
       "action": "fetch",
       "row": 1,
-      "col": 1
+      "col": 1,
+      "width": 120
     },
 
     {
@@ -30,7 +33,8 @@
       "col": 0,
       "validator": "int",
       "min": 0,
-      "max": 999999
+      "max": 999999,
+      "width": 200
     },
     {
       "type": "line",
@@ -38,7 +42,8 @@
       "key": "得意先名",
       "row": 2,
       "col": 1,
-      "col_span": 2
+      "col_span": 2,
+      "width": 300
     },
 
     {
@@ -47,7 +52,8 @@
       "key": "品名",
       "row": 3,
       "col": 0,
-      "col_span": 3
+      "col_span": 3,
+      "width": 400
     },
 
     {
@@ -59,7 +65,8 @@
       "validator": "float",
       "min": 0,
       "max": 999999999,
-      "decimals": 3
+      "decimals": 3,
+      "width": 200
     },
     {
       "type": "line",
@@ -70,7 +77,8 @@
       "validator": "float",
       "min": 0,
       "max": 999999999,
-      "decimals": 3
+      "decimals": 3,
+      "width": 200
     },
 
     {
@@ -82,7 +90,8 @@
       "validator": "float",
       "min": 0,
       "max": 999999999,
-      "decimals": 3
+      "decimals": 3,
+      "width": 200
     },
     {
       "type": "line",
@@ -93,7 +102,8 @@
       "validator": "float",
       "min": 0,
       "max": 999999999,
-      "decimals": 3
+      "decimals": 3,
+      "width": 200
     },
 
     {
@@ -105,7 +115,8 @@
       "validator": "float",
       "min": 0,
       "max": 999999999,
-      "decimals": 3
+      "decimals": 3,
+      "width": 200
     },
 
     {
@@ -116,7 +127,8 @@
       "col": 0,
       "validator": "int",
       "min": 0,
-      "max": 99
+      "max": 99,
+      "width": 200
     },
     {
       "type": "line",
@@ -126,7 +138,8 @@
       "col": 1,
       "validator": "int",
       "min": 0,
-      "max": 999999999
+      "max": 999999999,
+      "width": 200
     },
 
     {
@@ -136,18 +149,20 @@
       "row": 8,
       "col": 0,
       "col_span": 3,
-      "height": 160
+      "height": 160,
+      "width": 400
     },
 
     { "type": "spacer", "row": 9, "height": 8 },
 
-    { "type": "button", "text": "保存", "action": "save", "row": 10, "col": 2 },
+    { "type": "button", "text": "保存", "action": "save", "row": 10, "col": 2, "width": 120, "font_size": 16 },
     {
       "type": "button",
       "text": "クリア",
       "action": "clear",
       "row": 10,
-      "col": 3
+      "col": 3,
+      "width": 120
     }
   ]
 }
