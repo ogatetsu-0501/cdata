@@ -18,6 +18,7 @@ from openpyxl import load_workbook
 import sys
 import json
 import os
+import re
 from typing import Dict, Optional, Any
 
 
@@ -326,18 +327,25 @@ class MainWindow(QMainWindow):
 
     def update_button_states(self) -> None:
         """入力内容に応じて『データ取得』と『保存』のボタンを切り替えます。"""
-        # 品目番号の入力内容を取得します。存在しない場合は空文字とします。
+        # 品目番号の入力欄を取り出し、未設定なら空文字として扱います。
         item_widget = self.widgets.get("品目番号")
         item_text = ""
         if isinstance(item_widget, QLineEdit):
             item_text = item_widget.text().strip()
+
         # データファイルが設定されているかを確認します。
         has_file = self.current_xlsm is not None
-        # 「データ取得」ボタンは8桁の数字が入力されている場合のみ有効にします。
-        is_fetch_valid = len(item_text) == 8 and item_text.isdigit() and has_file
+
+        # 正規表現を使って「8桁の数字」のみを判定します。
+        # r"\d{8}" は「半角数字が8文字続く」という意味です。
+        is_item_eight_digits = re.fullmatch(r"\d{8}", item_text) is not None
+
+        # 「データ取得」ボタンは、8桁の数字が入力され、かつデータファイルが設定されている場合のみ有効にします。
+        is_fetch_valid = is_item_eight_digits and has_file
         if self.fetch_button is not None:
             self.fetch_button.setEnabled(is_fetch_valid)
-        # 「保存」ボタンは品目番号が空でなく、ファイルが設定されている場合のみ有効にします。
+
+        # 「保存」ボタンは、品目番号が空でなく、かつデータファイルが設定されている場合のみ有効にします。
         is_save_valid = bool(item_text) and has_file
         if self.save_button is not None:
             self.save_button.setEnabled(is_save_valid)
@@ -387,32 +395,48 @@ class MainWindow(QMainWindow):
 
     @QtCore.Slot()
     def on_fetch(self):
+        """『データ取得』ボタンが押されたときの処理です。"""
+        # 品目番号の入力欄から文字列を取り出します。存在しなければ空文字です。
         item = ""
         if "品目番号" in self.widgets and isinstance(self.widgets["品目番号"], QLineEdit):
             item = self.widgets["品目番号"].text().strip()
+
+        # 何も入力されていない場合は警告を出して処理を中断します。
         if not item:
             QMessageBox.warning(self, "入力エラー", "品目番号を入力してください。")
             return
+
+        # 入力された文字列が8桁の数字でなければ警告を出して処理を中断します。
+        if re.fullmatch(r"\d{8}", item) is None:
+            QMessageBox.warning(self, "入力エラー", "品目番号は8桁の半角数字で入力してください。")
+            return
+
         # 起動時にファイルが設定されていない場合は、読み込みを中止して警告します。
         if self.current_xlsm is None:
             QMessageBox.warning(
                 self,
                 "設定エラー",
-                "データファイルが設定されていないため、読み込みできません。"
+                "データファイルが設定されていないため、読み込みできません。",
             )
             return
+
+        # Excel ファイルから該当するレコードを読み込みます。
         try:
             rec = read_record_from_xlsm(
                 self.current_xlsm, item, self.excel_sheet)
             if rec is None:
+                # 見つからなかった場合は新規入力として扱います。
                 QMessageBox.information(self, "見つかりません", "新規入力できます。")
                 self.on_clear(keep_item=True)
             else:
+                # 読み込んだ値を画面の入力欄に反映させます。
                 filtered = {k: rec.get(k, "") for k in self.widgets.keys()}
                 self.fill_form(filtered)
                 self.status.showMessage("Excel から読み込みました。", 3000)
         except Exception as e:
+            # 何らかのエラーが発生した場合はメッセージを表示します。
             QMessageBox.critical(self, "読み込みエラー", str(e))
+
 
     @QtCore.Slot()
     def on_save(self):
