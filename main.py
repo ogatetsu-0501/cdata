@@ -21,6 +21,21 @@ import os
 from typing import Dict, Optional, Any
 
 
+# 数字だけを入力させたいフィールド名をまとめておきます。
+# ここに書かれた項目は、半角数字のみが入力できるように制限されます。
+NUMERIC_KEYS = {
+    "品目番号",
+    "得意先コード",
+    "シリンダー円周",
+    "シリンダー寸法",
+    "仕上寸法１",
+    "仕上寸法２",
+    "原巾",
+    "色数",
+    "必要本数",
+}
+
+
 # === Excel の読み書き関数 ===
 def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[Dict[str, str]]:
     wb = load_workbook(path, keep_vba=True, data_only=False)
@@ -215,17 +230,31 @@ class MainWindow(QMainWindow):
                     edit = QLineEdit()
                     val = f.get("validator", "")
                     if val == "int":
+                        # 最小値と最大値を読み込み、整数用のバリデータを準備します。
                         imin = int(f.get("min", 0))
                         imax = int(f.get("max", 2147483647))
-                        edit.setValidator(QIntValidator(imin, imax))
+                        iv = QIntValidator(imin, imax)
+                        # 英語ロケールを指定して全角数字を受け付けないようにします。
+                        iv.setLocale(QtCore.QLocale("C"))
+                        edit.setValidator(iv)
+                        # 対象の項目では IME を無効化し、半角数字のみを受け付けます。
+                        if key in NUMERIC_KEYS:
+                            edit.setInputMethodHints(QtCore.Qt.ImhDigitsOnly)
+                            edit.setAttribute(QtCore.Qt.WA_InputMethodEnabled, False)
                     elif val == "float":
+                        # 小数を扱う項目なので小数用のバリデータを設定します。
                         fmin = float(f.get("min", 0.0))
                         fmax = float(f.get("max", 1e12))
                         dec = int(f.get("decimals", 3))
                         v = QDoubleValidator(fmin, fmax, dec)
-                        v.setNotation(
-                            QDoubleValidator.Notation.StandardNotation)
+                        v.setNotation(QDoubleValidator.Notation.StandardNotation)
+                        # 英語ロケールに固定して全角文字を排除します。
+                        v.setLocale(QtCore.QLocale("C"))
                         edit.setValidator(v)
+                        # IME を無効化し、半角数字と小数点のみを入力可能にします。
+                        if key in NUMERIC_KEYS:
+                            edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
+                            edit.setAttribute(QtCore.Qt.WA_InputMethodEnabled, False)
 
                 edit.setStyleSheet(f"""
                     QLineEdit {{
