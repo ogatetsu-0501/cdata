@@ -157,7 +157,7 @@
 
     {
       "type": "button",
-      "text": "保存",
+      "text": "新規登録",
       "action": "save",
       "row": 10,
       "col": 2,
