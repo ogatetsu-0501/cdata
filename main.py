@@ -273,6 +273,8 @@ class MainWindow(QMainWindow):
             progress_dialog.setMinimumDuration(0)
             progress_dialog.setValue(0)
             progress_dialog.show()
+            # ここでイベントを処理してダイアログをすぐに表示させます。
+            QApplication.processEvents()
 
             # コールバック関数を定義し、シート読込ごとに進捗を更新します。
             def update_progress(current: int, total: int) -> None:
