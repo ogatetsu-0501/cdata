@@ -10,7 +10,7 @@ from PySide6.QtGui import QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QFileDialog,
-    QScrollArea, QFrame, QStatusBar, QMessageBox
+    QScrollArea, QFrame, QStatusBar, QMessageBox, QProgressDialog
 )
 from qt_material import apply_stylesheet
 from openpyxl import load_workbook
@@ -19,7 +19,7 @@ import sys
 import json
 import os
 import re
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Callable
 
 
 # 数字入力専用のラインエディットです。フォーカス時に入力モードを半角英数字に固定します。
@@ -107,7 +107,7 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str) -> N
 
 
 # === 起動時データ抽出関数 ===
-def extract_initial_data(path: str) -> Dict[str, List[List[Any]]]:
+def extract_initial_data(path: str, progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, List[List[Any]]]:
     """指定された Excel ファイルから二つのシートのデータをまとめて取得します。"""
     # Excel ファイル全体を開きます。
     wb = load_workbook(path, keep_vba=True, data_only=False)
@@ -115,12 +115,19 @@ def extract_initial_data(path: str) -> Dict[str, List[List[Any]]]:
     # 結果を格納する辞書を用意します。
     result: Dict[str, List[List[Any]]] = {}
 
+    # 進捗管理のために対象シートの一覧を用意します。
+    sheets = ("受注データ", "シリンダーデータ")
+    total = len(sheets)
+
     # 必要なシート名を順番に処理します。
-    for sheet in ("受注データ", "シリンダーデータ"):
+    for idx, sheet in enumerate(sheets, start=1):
         if sheet in wb.sheetnames:
             # 各シートから必要範囲のデータを取得します。
             ws = wb[sheet]
             result[sheet] = _extract_range_from_sheet(ws)
+        # 進捗コールバックがあれば現在の状況を通知します。
+        if progress is not None:
+            progress(idx, total)
 
     # 取得したデータを返します。
     return result
@@ -208,9 +215,31 @@ class MainWindow(QMainWindow):
         # 起動時に参照するデータを保存するための辞書を初期化します。
         self.preloaded_data: Dict[str, List[List[Any]]] = {}
         if self.current_xlsm is not None:
+            # 進捗を表示するためのダイアログを準備します。
+            progress_dialog = QProgressDialog(
+                "Excel からデータを読み込んでいます...",
+                "",
+                0,
+                2,
+                self,
+            )
+            progress_dialog.setWindowTitle("データ取得中")
+            progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            progress_dialog.setValue(0)
+            progress_dialog.show()
+
+            # コールバック関数を定義し、シート読込ごとに進捗を更新します。
+            def update_progress(current: int, total: int) -> None:
+                progress_dialog.setMaximum(total)
+                progress_dialog.setValue(current)
+                QApplication.processEvents()
+
             try:
                 # Excel ファイルから指定された二つのシートを読み込みます。
-                self.preloaded_data = extract_initial_data(self.current_xlsm)
+                self.preloaded_data = extract_initial_data(
+                    self.current_xlsm, update_progress
+                )
             except Exception as e:
                 # 読み込みに失敗した場合は警告を表示し、空のデータを保持します。
                 QMessageBox.warning(
@@ -219,6 +248,9 @@ class MainWindow(QMainWindow):
                     f"初期データの読み込みに失敗しました: {e}",
                 )
                 self.preloaded_data = {}
+            finally:
+                # 進捗ダイアログを閉じて画面を元に戻します。
+                progress_dialog.close()
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
