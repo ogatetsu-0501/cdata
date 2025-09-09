@@ -21,19 +21,17 @@ import os
 from typing import Dict, Optional, Any
 
 
-# 数字だけを入力させたいフィールド名をまとめておきます。
-# ここに書かれた項目は、半角数字のみが入力できるように制限されます。
-NUMERIC_KEYS = {
-    "品目番号",
-    "得意先コード",
-    "シリンダー円周",
-    "シリンダー寸法",
-    "仕上寸法１",
-    "仕上寸法２",
-    "原巾",
-    "色数",
-    "必要本数",
-}
+# 数字入力専用のラインエディットです。フォーカス時に IME を無効化します。
+class NumericLineEdit(QLineEdit):
+    def focusInEvent(self, event: QtGui.QFocusEvent) -> None:
+        # この欄が選択された瞬間に IME を強制的にオフにします。
+        self.setAttribute(QtCore.Qt.WA_InputMethodEnabled, False)
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
+        # 他の欄へ移動したら IME を再び使えるように戻します。
+        self.setAttribute(QtCore.Qt.WA_InputMethodEnabled, True)
+        super().focusOutEvent(event)
 
 
 # === Excel の読み書き関数 ===
@@ -223,12 +221,17 @@ class MainWindow(QMainWindow):
 
                 if ftype == "text":
                     edit = QPlainTextEdit()
-                    # JSONで指定された高さを設定します。
+                    # JSON で指定された高さを読み取り、その大きさに固定します。
                     h = int(f.get("height", 120))
                     edit.setFixedHeight(h)
                 else:
-                    edit = QLineEdit()
                     val = f.get("validator", "")
+                    # 数値専用欄では専用のラインエディットを利用します。
+                    if val in ("int", "float"):
+                        edit = NumericLineEdit()
+                    else:
+                        edit = QLineEdit()
+
                     if val == "int":
                         # 最小値と最大値を読み込み、整数用のバリデータを準備します。
                         imin = int(f.get("min", 0))
@@ -237,12 +240,10 @@ class MainWindow(QMainWindow):
                         # 英語ロケールを指定して全角数字を受け付けないようにします。
                         iv.setLocale(QtCore.QLocale("C"))
                         edit.setValidator(iv)
-                        # 対象の項目では IME を無効化し、半角数字のみを受け付けます。
-                        if key in NUMERIC_KEYS:
-                            edit.setInputMethodHints(QtCore.Qt.ImhDigitsOnly)
-                            edit.setAttribute(QtCore.Qt.WA_InputMethodEnabled, False)
+                        # フォーカス時に IME を無効化し、半角数字のみを受け付けます。
+                        edit.setInputMethodHints(QtCore.Qt.ImhDigitsOnly)
                     elif val == "float":
-                        # 小数を扱う項目なので小数用のバリデータを設定します。
+                        # 小数を扱う欄なので小数用のバリデータを設定します。
                         fmin = float(f.get("min", 0.0))
                         fmax = float(f.get("max", 1e12))
                         dec = int(f.get("decimals", 3))
@@ -251,10 +252,8 @@ class MainWindow(QMainWindow):
                         # 英語ロケールに固定して全角文字を排除します。
                         v.setLocale(QtCore.QLocale("C"))
                         edit.setValidator(v)
-                        # IME を無効化し、半角数字と小数点のみを入力可能にします。
-                        if key in NUMERIC_KEYS:
-                            edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
-                            edit.setAttribute(QtCore.Qt.WA_InputMethodEnabled, False)
+                        # フォーカス時に IME を無効化し、数値と小数点のみを許可します。
+                        edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
 
                 edit.setStyleSheet(f"""
                     QLineEdit {{
