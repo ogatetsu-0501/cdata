@@ -5,10 +5,10 @@
   "grid_columns": 4,
   "font_size": 20,
   "fields": [
-    {
-      "type": "line",
-      "label": "品目番号",
-      "key": "品目番号",
+      {
+        "type": "line",
+        "label": "品目番号",
+        "key": "品目番号",
       "row": 1,
       "col": 0,
       "validator": "int",

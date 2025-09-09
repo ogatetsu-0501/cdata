@@ -46,63 +46,78 @@ class NumericLineEdit(QLineEdit):
 
 # === Excel の読み書き関数 ===
 def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[Dict[str, str]]:
+    """Excel ファイルから品目番号に一致する行を辞書にして返します。"""
+    # Excel ファイルを開きます。
     wb = load_workbook(path, keep_vba=True, data_only=False)
     if sheet_name not in wb.sheetnames:
         raise ValueError(f"シート『{sheet_name}』がありません")
     ws = wb[sheet_name]
 
+    # 1 行目の見出しを調べて、列名と列番号の対応表を作ります。
     header_map: Dict[str, int] = {}
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=1, column=c).value
         if v is not None:
             header_map[str(v)] = c
 
+    # 必要な「品目番号」列が存在するか確認します。
     if "品目番号" not in header_map:
         raise ValueError("『品目番号』の列が見つかりません")
 
     col_item = header_map["品目番号"]
     target_row = None
+    # 2 行目以降を順番に見て品目番号が一致する行を探します。
     for r in range(2, ws.max_row + 1):
         if str(ws.cell(row=r, column=col_item).value or "") == item_no:
             target_row = r
             break
+    # 見つからなければ None を返します。
     if target_row is None:
         return None
 
+    # 見つかった行の値を列名とセットで辞書にまとめて返します。
     return {name: str(ws.cell(row=target_row, column=header_map.get(name)).value or "")
             for name in header_map.keys()}
 
 
 def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str) -> None:
+    """品目番号をキーとして Excel ファイルへ行の追加または更新を行います。"""
+    # Excel ファイルを開きます。
     wb = load_workbook(path, keep_vba=True, data_only=False)
     if sheet_name not in wb.sheetnames:
         raise ValueError(f"シート『{sheet_name}』がありません")
     ws = wb[sheet_name]
 
+    # 見出し行を読み取り、列名と列番号の対応表を作ります。
     header_map: Dict[str, int] = {}
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=1, column=c).value
         if v is not None:
             header_map[str(v)] = c
 
+    # 「品目番号」列が無いときはエラーにします。
     if "品目番号" not in header_map:
         raise ValueError("『品目番号』の列が見つかりません")
 
     col_item = header_map["品目番号"]
     target_row = None
+    # 既存の行に同じ品目番号があるか確認します。
     for r in range(2, ws.max_row + 1):
         if str(ws.cell(row=r, column=col_item).value or "") == data.get("品目番号", ""):
             target_row = r
             break
+    # 無ければ最後の行の次に追加します。
     if target_row is None:
         target_row = ws.max_row + 1
 
+    # 対応する列に値を書き込みます。存在しない列は無視します。
     for k, v in data.items():
         c = header_map.get(k)
         if c is None:
             continue
         ws.cell(row=target_row, column=c).value = v
 
+    # Excel ファイルを保存します。
     wb.save(path)
 
 
@@ -141,6 +156,7 @@ def _extract_range_from_sheet(ws) -> List[List[Any]]:
             header_map[str(v)] = c
 
     # 「品目番号」と「品目番号+刷順」列の最後の入力行を確認します。
+    # ここではデータが入力されている最終行を求めています。
     last_row = 1
     for key in ("品目番号", "品目番号+刷順"):
         col = header_map.get(key)
@@ -162,6 +178,35 @@ def _extract_range_from_sheet(ws) -> List[List[Any]]:
 
     # 作成したデータを返します。
     return data
+
+
+def find_record_by_column(data: List[List[Any]], column: str, value: str) -> Optional[Dict[str, str]]:
+    """事前に読み込んだ二次元リストから指定列の値を探します。"""
+    # データが空の場合はすぐに終了します。
+    if not data:
+        return None
+
+    # 1 行目は見出しとして扱い、列名の一覧を作ります。
+    headers = [str(v) if v is not None else "" for v in data[0]]
+
+    # 探したい列名が存在するか確認します。
+    if column not in headers:
+        raise ValueError(f"『{column}』の列が見つかりません")
+
+    idx = headers.index(column)
+
+    # 2 行目以降を順番に調べて一致する値を探します。
+    for row in data[1:]:
+        cell_value = ""
+        if idx < len(row) and row[idx] is not None:
+            cell_value = str(row[idx])
+        if cell_value == value:
+            # 見つかった行の値を列名と対応させた辞書に変換して返します。
+            return {h: (str(row[i]) if i < len(row) and row[i] is not None else "")
+                    for i, h in enumerate(headers) if h}
+
+    # 一致する行が無かった場合は None を返します。
+    return None
 
 
 # === マテリアル風のカード ===
@@ -484,33 +529,28 @@ class MainWindow(QMainWindow):
     def on_fetch(self):
         """『データ取得』ボタンが押されたときの処理です。"""
         # 品目番号の入力欄から文字列を取り出します。存在しなければ空文字です。
-        item = ""
+        item_no = ""
         if "品目番号" in self.widgets and isinstance(self.widgets["品目番号"], QLineEdit):
-            item = self.widgets["品目番号"].text().strip()
+            item_no = self.widgets["品目番号"].text().strip()
 
         # 何も入力されていない場合は警告を出して処理を中断します。
-        if not item:
+        if not item_no:
             QMessageBox.warning(self, "入力エラー", "品目番号を入力してください。")
             return
 
         # 入力された文字列が8桁の数字でなければ警告を出して処理を中断します。
-        if re.fullmatch(r"\d{8}", item) is None:
+        if re.fullmatch(r"\d{8}", item_no) is None:
             QMessageBox.warning(self, "入力エラー", "品目番号は8桁の半角数字で入力してください。")
             return
 
-        # 起動時にファイルが設定されていない場合は、読み込みを中止して警告します。
-        if self.current_xlsm is None:
-            QMessageBox.warning(
-                self,
-                "設定エラー",
-                "データファイルが設定されていないため、読み込みできません。",
-            )
+        # 起動時に読み込んでおいたデータを使って該当行を探します。
+        sheet_data = self.preloaded_data.get(self.excel_sheet)
+        if not sheet_data:
+            QMessageBox.warning(self, "データなし", "事前に読み込んだデータがありません。")
             return
 
-        # Excel ファイルから該当するレコードを読み込みます。
         try:
-            rec = read_record_from_xlsm(
-                self.current_xlsm, item, self.excel_sheet)
+            rec = find_record_by_column(sheet_data, "品目番号", item_no)
             if rec is None:
                 # 見つからなかった場合は新規入力として扱います。
                 QMessageBox.information(self, "見つかりません", "新規入力できます。")
@@ -519,7 +559,7 @@ class MainWindow(QMainWindow):
                 # 読み込んだ値を画面の入力欄に反映させます。
                 filtered = {k: rec.get(k, "") for k in self.widgets.keys()}
                 self.fill_form(filtered)
-                self.status.showMessage("Excel から読み込みました。", 3000)
+                self.status.showMessage("事前データから読み込みました。", 3000)
         except Exception as e:
             # 何らかのエラーが発生した場合はメッセージを表示します。
             QMessageBox.critical(self, "読み込みエラー", str(e))
