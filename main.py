@@ -88,6 +88,8 @@ class _SpinnerWidget(QtWidgets.QWidget):
         self._timer.start(16)
         # 大きさを決めます。ここでは正方形の領域とします。
         self.setFixedSize(64, 64)
+        # スピナーが四角い枠で切れないよう、背景を透過させます。
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
 
     def _rotate(self) -> None:
         # 角度を細かく増やして滑らかに回転させます。360度で一周です。
@@ -103,9 +105,12 @@ class _SpinnerWidget(QtWidgets.QWidget):
         painter.translate(rect.center())
         # 現在の角度だけ回転させます。
         painter.rotate(self._angle)
-        radius = min(rect.width(), rect.height()) / 2 - self._pen_width / 2
+        # ペンの太さ分だけ半径を小さくし、円弧が切れないよう余白を確保します。
+        radius = min(rect.width(), rect.height()) / 2 - self._pen_width
         # スピナーを青色にするため、RGB(0,0,255)を指定したペンを使用します。
         pen = QtGui.QPen(QtGui.QColor(0, 0, 255), self._pen_width)
+        # ペンの端を丸くして自然な見た目にします。
+        pen.setCapStyle(QtCore.Qt.RoundCap)
         painter.setPen(pen)
         # 270度分だけ線を描いて空白を作り、回転で動いているように見せます。
         painter.drawArc(QtCore.QRectF(-radius, -radius, radius * 2, radius * 2), 0, 270 * 16)
