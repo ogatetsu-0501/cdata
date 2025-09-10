@@ -140,6 +140,8 @@ class CylinderUnit(QWidget):
         # 文字列が枠からはみ出さないよう、内容に応じて幅を調整します。
         self.order_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         row.addWidget(self.order_combo)
+        # デバッグ用として、色の順番プルダウンの整列状態を表示します。
+        print("Debug: order_combo alignment =", self.order_combo.alignment())
 
         # 使用シリンダー番号を選ぶプルダウンです。入力補完のため編集可能にし、幅を自動調整します。
         self.cylinder_combo = QComboBox()
@@ -148,6 +150,8 @@ class CylinderUnit(QWidget):
         self.cylinder_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._refresh_cylinder_list()
         row.addWidget(self.cylinder_combo)
+        # デバッグ用として、シリンダー番号プルダウンの整列状態を表示します。
+        print("Debug: cylinder_combo alignment =", self.cylinder_combo.alignment())
 
         # 色名を入力するテキストボックスです。
         self.color_edit = QLineEdit()
@@ -174,6 +178,8 @@ class CylinderUnit(QWidget):
             "廃棄行き",
         ])
         row.addWidget(self.process_combo)
+        # デバッグ用として、旧版処理プルダウンの整列状態を表示します。
+        print("Debug: process_combo alignment =", self.process_combo.alignment())
 
         # 上段レイアウトをウィジェット全体に追加します。
         layout.addLayout(row)
@@ -969,6 +975,9 @@ def main():
             text-align: left;
         }
     """)
+
+    # デバッグ用として、スタイルシートが設定されたことを知らせます。
+    print("Debug: stylesheet for QComboBox alignment has been set")
 
     w = MainWindow(layout_path)
     w.showMaximized()  # ← 起動時に最大化
