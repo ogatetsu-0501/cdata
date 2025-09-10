@@ -52,12 +52,15 @@ class LoadingSpinner(QtWidgets.QDialog):
         super().__init__(parent)
         # 枠を消してシンプルな小窓にします。
         self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
-        # 画面中央に配置されるようにサイズを固定します。
-        self.setFixedSize(120, 120)
+        # 画面中央に配置されるように少し大きめのサイズを固定し、
+        # スピナーと文字が重ならないようにします。
+        self.setFixedSize(160, 160)
 
         # 縦に部品を並べるレイアウトを用意します。
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
+        # スピナーとラベルの間に適度な空白を確保します。
+        layout.setSpacing(10)
 
         # 実際にぐるぐるを描画する小さなウィジェットを追加します。
         self.indicator = _SpinnerWidget(self)
@@ -101,7 +104,8 @@ class _SpinnerWidget(QtWidgets.QWidget):
         # 現在の角度だけ回転させます。
         painter.rotate(self._angle)
         radius = min(rect.width(), rect.height()) / 2 - self._pen_width / 2
-        pen = QtGui.QPen(QtGui.QColor(100, 100, 100), self._pen_width)
+        # スピナーを青色にするため、RGB(0,0,255)を指定したペンを使用します。
+        pen = QtGui.QPen(QtGui.QColor(0, 0, 255), self._pen_width)
         painter.setPen(pen)
         # 270度分だけ線を描いて空白を作り、回転で動いているように見せます。
         painter.drawArc(QtCore.QRectF(-radius, -radius, radius * 2, radius * 2), 0, 270 * 16)
