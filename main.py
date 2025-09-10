@@ -140,8 +140,8 @@ class CylinderUnit(QWidget):
         # 文字列が枠からはみ出さないよう、内容に応じて幅を調整します。
         self.order_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         row.addWidget(self.order_combo)
-        # デバッグ用として、色の順番プルダウンの整列状態を表示します。
-        print("Debug: order_combo alignment =", self.order_combo.alignment())
+        # QComboBox には整列状態を取得する専用メソッドが無いため、
+        # ここではデバッグ用の表示を行っておりません。
 
         # 使用シリンダー番号を選ぶプルダウンです。入力補完のため編集可能にし、幅を自動調整します。
         self.cylinder_combo = QComboBox()
@@ -150,8 +150,8 @@ class CylinderUnit(QWidget):
         self.cylinder_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._refresh_cylinder_list()
         row.addWidget(self.cylinder_combo)
-        # デバッグ用として、シリンダー番号プルダウンの整列状態を表示します。
-        print("Debug: cylinder_combo alignment =", self.cylinder_combo.alignment())
+        # QComboBox は標準で左寄せ表示となるため、
+        # 整列状態を表示するデバッグ処理は削除しています。
 
         # 色名を入力するテキストボックスです。
         self.color_edit = QLineEdit()
@@ -178,8 +178,8 @@ class CylinderUnit(QWidget):
             "廃棄行き",
         ])
         row.addWidget(self.process_combo)
-        # デバッグ用として、旧版処理プルダウンの整列状態を表示します。
-        print("Debug: process_combo alignment =", self.process_combo.alignment())
+        # こちらも標準の表示で問題ないため、
+        # 整列に関するデバッグ出力は行っておりません。
 
         # 上段レイアウトをウィジェット全体に追加します。
         layout.addLayout(row)
@@ -965,9 +965,8 @@ def main():
             color: #9E9E9E;
         }
         QComboBox {
-            /* プルダウンの文字色を黒に固定し、選択欄の文字を左寄せにします。 */
+            /* プルダウンの文字色を黒に固定します。 */
             color: #000000;
-            qproperty-alignment: 'AlignLeft';
         }
         QComboBox QAbstractItemView::item {
             /* 展開したリストの各項目も左寄せにします。 */
@@ -976,8 +975,8 @@ def main():
         }
     """)
 
-    # デバッグ用として、スタイルシートが設定されたことを知らせます。
-    print("Debug: stylesheet for QComboBox alignment has been set")
+    # デバッグ用として、スタイルシートが正しく適用されたかを知らせます。
+    print("Debug: stylesheet for QComboBox color has been set")
 
     w = MainWindow(layout_path)
     w.showMaximized()  # ← 起動時に最大化
