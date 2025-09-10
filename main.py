@@ -515,8 +515,22 @@ class MainWindow(QMainWindow):
         # シリンダーデータ登録欄を配置するための部品を用意します。
         self.cyl_title = QLabel("シリンダーデータ登録")
         self.cyl_title.setStyleSheet("font-weight:600;")
+
+        # シリンダー入力欄全体をまとめる縦並びレイアウトを準備します。
         self.cylinder_layout = QVBoxLayout()
         self.cylinder_layout.setSpacing(8)
+
+        # ヘッダー行を用意し、各列の見出しを配置します。
+        self.cylinder_header = QHBoxLayout()
+        header_labels = ["〇色目", "シリンダー番号", "色名", "ベタ巾", "旧版処理"]
+        for text in header_labels:
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-weight:600;")
+            self.cylinder_header.addWidget(lbl)
+        # ヘッダーは最上段に配置します。
+        self.cylinder_layout.addLayout(self.cylinder_header)
+
+        # 実際の入力行を保持するためのリストを初期化します。
         self.cylinder_units: List[CylinderUnit] = []
 
         wrap.addLayout(self.grid)
@@ -743,11 +757,13 @@ class MainWindow(QMainWindow):
 
     def _clear_cylinder_units(self) -> None:
         """シリンダー入力欄をすべて取り除きます。"""
-        while self.cylinder_layout.count():
-            item = self.cylinder_layout.takeAt(0)
+        # 先頭にはヘッダーがあるため、1番目以降の要素のみを削除します。
+        while self.cylinder_layout.count() > 1:
+            item = self.cylinder_layout.takeAt(1)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
+        # ユニット管理用のリストも空に戻します。
         self.cylinder_units = []
 
     def update_color_numbers(self, start: int) -> None:
@@ -756,8 +772,15 @@ class MainWindow(QMainWindow):
         for idx, unit in enumerate(self.cylinder_units):
             unit.order_combo.blockSignals(True)
             unit.order_combo.clear()
-            unit.order_combo.addItems(nums)
-            unit.order_combo.setCurrentIndex(idx)
+            if idx == 0:
+                # 1列目は0か1を選択できるようにします。
+                unit.order_combo.addItems(["0", "1"])
+                unit.order_combo.setCurrentText(nums[0])
+                unit.order_combo.setEnabled(True)
+            else:
+                # 2列目以降は番号を固定表示し、編集を禁止します。
+                unit.order_combo.addItem(nums[idx])
+                unit.order_combo.setEnabled(False)
             unit.order_combo.blockSignals(False)
 
     def on_first_color_changed(self, text: str) -> None:
