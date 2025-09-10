@@ -133,15 +133,19 @@ class CylinderUnit(QWidget):
         # 上段の横並びレイアウトを用意します。
         row = QHBoxLayout()
 
-        # 色の順番を示すコンボボックスです。後で番号を設定します。
+        # 色の順番を示すプルダウンです。中身の幅に合わせてサイズを自動調整します。
         self.order_combo = QComboBox()
-        # 初期状態で選べる番号として「0」と「1」をあらかじめ登録します。
+        # 初期状態で選べる番号として「0」と「1」を登録します。
         self.order_combo.addItems(["0", "1"])
+        # 文字列が枠からはみ出さないよう、内容に応じて幅を調整します。
+        self.order_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         row.addWidget(self.order_combo)
 
-        # 使用シリンダー番号を入力するコンボボックスです。入力補完のため編集可能にします。
+        # 使用シリンダー番号を選ぶプルダウンです。入力補完のため編集可能にし、幅を自動調整します。
         self.cylinder_combo = QComboBox()
         self.cylinder_combo.setEditable(True)
+        # 文字がリストからはみ出ないようにします。
+        self.cylinder_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._refresh_cylinder_list()
         row.addWidget(self.cylinder_combo)
 
@@ -158,8 +162,10 @@ class CylinderUnit(QWidget):
         self.width_edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
         row.addWidget(self.width_edit)
 
-        # 旧版処理を選ぶコンボボックスです。
+        # 旧版処理を選ぶプルダウンです。文字が枠から飛び出さないよう調整します。
         self.process_combo = QComboBox()
+        # 中身に合わせて幅を調整します。
+        self.process_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.process_combo.addItems([
             "変更無し",
             "同名製版",
