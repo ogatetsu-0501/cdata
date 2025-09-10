@@ -10,7 +10,8 @@ from PySide6.QtGui import QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QFileDialog,
-    QScrollArea, QFrame, QStatusBar, QMessageBox
+    QScrollArea, QFrame, QStatusBar, QMessageBox, QComboBox,
+    QHBoxLayout
 )
 from qt_material import apply_stylesheet
 from openpyxl import load_workbook
@@ -88,6 +89,8 @@ class _SpinnerWidget(QtWidgets.QWidget):
         self._timer.start(16)
         # 大きさを決めます。ここでは正方形の領域とします。
         self.setFixedSize(64, 64)
+        # スピナーが四角い枠で切れないよう、背景を透過させます。
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
 
     def _rotate(self) -> None:
         # 角度を細かく増やして滑らかに回転させます。360度で一周です。
@@ -103,13 +106,95 @@ class _SpinnerWidget(QtWidgets.QWidget):
         painter.translate(rect.center())
         # 現在の角度だけ回転させます。
         painter.rotate(self._angle)
-        radius = min(rect.width(), rect.height()) / 2 - self._pen_width / 2
+        # ペンの太さ分だけ半径を小さくし、円弧が切れないよう余白を確保します。
+        radius = min(rect.width(), rect.height()) / 2 - self._pen_width
         # スピナーを青色にするため、RGB(0,0,255)を指定したペンを使用します。
         pen = QtGui.QPen(QtGui.QColor(0, 0, 255), self._pen_width)
+        # ペンの端を丸くして自然な見た目にします。
+        pen.setCapStyle(QtCore.Qt.RoundCap)
         painter.setPen(pen)
         # 270度分だけ線を描いて空白を作り、回転で動いているように見せます。
         painter.drawArc(QtCore.QRectF(-radius, -radius, radius * 2, radius * 2), 0, 270 * 16)
 
+
+# === シリンダー入力ユニット ===
+class CylinderUnit(QWidget):
+    def __init__(self, get_item_no: Callable[[], str]) -> None:
+        """シリンダー情報を1行分まとめる部品です。"""
+        super().__init__()
+        # 品目番号を取得する関数を保持します。
+        self._get_item_no = get_item_no
+
+        # 全体を縦に並べるレイアウトを用意します。
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        # 上段の横並びレイアウトを用意します。
+        row = QHBoxLayout()
+
+        # 色の順番を示すコンボボックスです。後で番号を設定します。
+        self.order_combo = QComboBox()
+        row.addWidget(self.order_combo)
+
+        # 使用シリンダー番号を入力するコンボボックスです。入力補完のため編集可能にします。
+        self.cylinder_combo = QComboBox()
+        self.cylinder_combo.setEditable(True)
+        self._refresh_cylinder_list()
+        row.addWidget(self.cylinder_combo)
+
+        # 色名を入力するテキストボックスです。
+        self.color_edit = QLineEdit()
+        row.addWidget(self.color_edit)
+
+        # ベタ巾を入力する数値専用の欄です。
+        self.width_edit = NumericLineEdit()
+        dv = QDoubleValidator(0.0, 1e12, 3)
+        dv.setNotation(QDoubleValidator.Notation.StandardNotation)
+        dv.setLocale(QtCore.QLocale("C"))
+        self.width_edit.setValidator(dv)
+        self.width_edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
+        row.addWidget(self.width_edit)
+
+        # 旧版処理を選ぶコンボボックスです。
+        self.process_combo = QComboBox()
+        self.process_combo.addItems([
+            "変更無し",
+            "同名製版",
+            "落組行き",
+            "名義変更",
+            "廃棄行き",
+        ])
+        row.addWidget(self.process_combo)
+
+        # 上段レイアウトをウィジェット全体に追加します。
+        layout.addLayout(row)
+
+        # 名義変更を選んだ場合にのみ表示する数値入力欄です。
+        self.rename_edit = NumericLineEdit()
+        iv = QIntValidator(0, 999999999)
+        iv.setLocale(QtCore.QLocale("C"))
+        self.rename_edit.setValidator(iv)
+        self.rename_edit.setInputMethodHints(QtCore.Qt.ImhDigitsOnly)
+        self.rename_edit.setPlaceholderText("名義変更先の番号")
+        self.rename_edit.hide()
+        layout.addWidget(self.rename_edit)
+
+        # 旧版処理の選択が変わったときに表示・非表示を切り替えます。
+        self.process_combo.currentTextChanged.connect(self._on_process_changed)
+
+    def _refresh_cylinder_list(self) -> None:
+        """品目番号に基づくシリンダー候補を更新します。"""
+        self.cylinder_combo.clear()
+        item_no = self._get_item_no()
+        # ここでは簡易的に1から10までの番号を候補としています。
+        # 実際の仕様に合わせて調整してください。
+        candidates = [f"{item_no}-{i}" if item_no else str(i) for i in range(1, 11)]
+        self.cylinder_combo.addItems(candidates)
+
+    def _on_process_changed(self, text: str) -> None:
+        """旧版処理の内容によって追加欄を表示します。"""
+        self.rename_edit.setVisible(text == "名義変更")
 
 # === Excel の読み書き関数 ===
 def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[Dict[str, str]]:
@@ -409,8 +494,21 @@ class MainWindow(QMainWindow):
             item_widget.textChanged.connect(self.on_item_no_changed)
         # 起動直後にも一度状態を確認しておきます。
         self.update_button_states()
+        # 色数の入力内容に応じてシリンダー欄を更新します。
+        color_widget = self.widgets.get("色数")
+        if isinstance(color_widget, QLineEdit):
+            color_widget.textChanged.connect(self.on_color_count_changed)
+
+        # シリンダーデータ登録欄を配置するための部品を用意します。
+        self.cyl_title = QLabel("シリンダーデータ登録")
+        self.cyl_title.setStyleSheet("font-weight:600;")
+        self.cylinder_layout = QVBoxLayout()
+        self.cylinder_layout.setSpacing(8)
+        self.cylinder_units: List[CylinderUnit] = []
 
         wrap.addLayout(self.grid)
+        wrap.addWidget(self.cyl_title)
+        wrap.addLayout(self.cylinder_layout)
         root.addWidget(self.card)
         scroll.setWidget(container)
         self.setCentralWidget(scroll)
@@ -604,6 +702,55 @@ class MainWindow(QMainWindow):
             self.save_button.setEnabled(is_save_valid)
             # 判定結果に応じた文字列をボタンに表示します。
             self.save_button.setText(save_text)
+
+    def on_color_count_changed(self, text: str) -> None:
+        """色数に応じてシリンダー入力欄を増減させます。"""
+        # 入力された文字を整数に変換し、無効な場合は0とします。
+        count = int(text) if text.isdigit() else 0
+        # 既存のシリンダー入力欄をすべて削除します。
+        self._clear_cylinder_units()
+        # 指定された数だけ新しいユニットを追加します。
+        for _ in range(count):
+            unit = CylinderUnit(self._get_item_no)
+            self.cylinder_layout.addWidget(unit)
+            self.cylinder_units.append(unit)
+        # 番号の初期状態は1から始めます。
+        self.update_color_numbers(1)
+        # 先頭の番号欄だけは0への切り替えを受け付けます。
+        if self.cylinder_units:
+            first = self.cylinder_units[0].order_combo
+            first.currentTextChanged.connect(self.on_first_color_changed)
+
+    def _get_item_no(self) -> str:
+        """現在入力されている品目番号を取得します。"""
+        w = self.widgets.get("品目番号")
+        if isinstance(w, QLineEdit):
+            return w.text().strip()
+        return ""
+
+    def _clear_cylinder_units(self) -> None:
+        """シリンダー入力欄をすべて取り除きます。"""
+        while self.cylinder_layout.count():
+            item = self.cylinder_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self.cylinder_units = []
+
+    def update_color_numbers(self, start: int) -> None:
+        """表示される色番号を0または1から順番に並べ直します。"""
+        nums = [str(start + i) for i in range(len(self.cylinder_units))]
+        for idx, unit in enumerate(self.cylinder_units):
+            unit.order_combo.blockSignals(True)
+            unit.order_combo.clear()
+            unit.order_combo.addItems(nums)
+            unit.order_combo.setCurrentIndex(idx)
+            unit.order_combo.blockSignals(False)
+
+    def on_first_color_changed(self, text: str) -> None:
+        """先頭の色番号が0か1かで全体の番号を調整します。"""
+        start = 0 if text.strip() == "0" else 1
+        self.update_color_numbers(start)
 
     def collect_form_data(self) -> Dict[str, str]:
         d: Dict[str, str] = {}
