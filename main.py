@@ -135,6 +135,8 @@ class CylinderUnit(QWidget):
 
         # 色の順番を示すコンボボックスです。後で番号を設定します。
         self.order_combo = QComboBox()
+        # 初期状態で選べる番号として「0」と「1」をあらかじめ登録します。
+        self.order_combo.addItems(["0", "1"])
         row.addWidget(self.order_combo)
 
         # 使用シリンダー番号を入力するコンボボックスです。入力補完のため編集可能にします。
