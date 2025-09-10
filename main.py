@@ -949,16 +949,24 @@ def main():
     # 無効状態の入力欄やボタンを灰色にするスタイルと、
     # プルダウン(QComboBox)の文字色を黒にするスタイルを追加します。
     # 文字色を黒に固定することで、背景色に影響されず視認性が保たれます。
+    # スタイルシートを追加して部品の見た目を統一します。
     app.setStyleSheet(app.styleSheet() + """
         QLineEdit:disabled,
         QPlainTextEdit:disabled,
         QPushButton:disabled {
+            /* 無効状態の入力欄やボタンを灰色にします。 */
             background-color: #E0E0E0;
             color: #9E9E9E;
         }
-        QComboBox,
-        QComboBox QAbstractItemView {
+        QComboBox {
+            /* プルダウンの文字色を黒に固定し、選択欄の文字を左寄せにします。 */
             color: #000000;
+            qproperty-alignment: 'AlignLeft';
+        }
+        QComboBox QAbstractItemView::item {
+            /* 展開したリストの各項目も左寄せにします。 */
+            color: #000000;
+            text-align: left;
         }
     """)
 
