@@ -938,14 +938,19 @@ def main():
 
     app = QApplication(sys.argv)
     apply_stylesheet(app, theme="light_blue.xml")
-    # 無効状態の入力欄やボタンを灰色で表示するためのスタイルを追加します。
-    # 利用できないことが見た目で分かるようにしています。
+    # 無効状態の入力欄やボタンを灰色にするスタイルと、
+    # プルダウン(QComboBox)の文字色を黒にするスタイルを追加します。
+    # 文字色を黒に固定することで、背景色に影響されず視認性が保たれます。
     app.setStyleSheet(app.styleSheet() + """
         QLineEdit:disabled,
         QPlainTextEdit:disabled,
         QPushButton:disabled {
             background-color: #E0E0E0;
             color: #9E9E9E;
+        }
+        QComboBox,
+        QComboBox QAbstractItemView {
+            color: #000000;
         }
     """)
 
