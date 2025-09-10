@@ -401,17 +401,11 @@ class MainWindow(QMainWindow):
         self.path_store = os.path.join(os.path.dirname(layout_path), "data_file_path.txt")
         # 既に保存済みのパスを読み込むか、無い場合はダイアログで一度だけ選んでもらいます。
         self.current_xlsm: Optional[str] = self.load_xlsm_path()
-        # ファイルが選択されなかった場合は、後の操作ができない旨を表示します。
-        if self.current_xlsm is None:
-            QMessageBox.information(
-                self,
-                "設定情報",
-                "データファイルが設定されていないため、読み書きは行えません。"
-            )
 
         # 起動時に参照するデータを保存するための辞書を初期化します。
         self.preloaded_data: Dict[str, List[List[Any]]] = {}
-        if self.current_xlsm is not None:
+        # Excel の初期データを読み込む処理を繰り返し試みます。
+        while self.current_xlsm is not None:
             # 読み込み中であることを示す小さなウインドウを表示します。
             spinner = LoadingSpinner(self)
             spinner.show()
@@ -438,16 +432,35 @@ class MainWindow(QMainWindow):
             thread.join()
             spinner.close()
 
-            # 結果を確認し、エラーであれば知らせます。
+            # 結果を確認し、エラーであれば別のファイルを選び直します。
             if container["error"] is not None:
                 QMessageBox.warning(
                     self,
                     "読み込みエラー",
                     f"初期データの読み込みに失敗しました: {container['error']}",
                 )
-                self.preloaded_data = {}
+                # ユーザーに別のファイルを選択してもらいます。
+                new_path = self.ask_xlsm_path()
+                if new_path:
+                    # 選択されたパスを保存し、再度ループを試みます。
+                    with open(self.path_store, "w", encoding="utf-8") as f:
+                        f.write(new_path)
+                    self.current_xlsm = new_path
+                    continue
+                # キャンセルされた場合は current_xlsm を None にしてループを終了します。
+                self.current_xlsm = None
             else:
+                # 正常に読み込めた場合は結果を保持してループを抜けます。
                 self.preloaded_data = container["data"]
+                break
+
+        # 最終的にファイルが設定されていない場合は情報メッセージを表示します。
+        if self.current_xlsm is None:
+            QMessageBox.information(
+                self,
+                "設定情報",
+                "データファイルが設定されていないため、読み書きは行えません。",
+            )
 
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
