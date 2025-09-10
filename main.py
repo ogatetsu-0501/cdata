@@ -770,17 +770,23 @@ class MainWindow(QMainWindow):
         """表示される色番号を0または1から順番に並べ直します。"""
         nums = [str(start + i) for i in range(len(self.cylinder_units))]
         for idx, unit in enumerate(self.cylinder_units):
+            # シグナルを一時的に停止し、不要なイベント発生を防ぎます。
             unit.order_combo.blockSignals(True)
+            # 既存の選択肢をすべて削除します。
             unit.order_combo.clear()
             if idx == 0:
                 # 1列目は0か1を選択できるようにします。
                 unit.order_combo.addItems(["0", "1"])
-                unit.order_combo.setCurrentText(nums[0])
+                # 開始番号に応じて表示する値を明示的に指定します。
+                unit.order_combo.setCurrentIndex(0 if start == 0 else 1)
                 unit.order_combo.setEnabled(True)
             else:
                 # 2列目以降は番号を固定表示し、編集を禁止します。
                 unit.order_combo.addItem(nums[idx])
+                # 追加した番号を確実に表示するためにインデックスを指定します。
+                unit.order_combo.setCurrentIndex(0)
                 unit.order_combo.setEnabled(False)
+            # シグナルの停止を解除します。
             unit.order_combo.blockSignals(False)
 
     def on_first_color_changed(self, text: str) -> None:
