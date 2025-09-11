@@ -23,6 +23,17 @@ import re
 from typing import Dict, Optional, Any, List, Callable
 import threading
 
+# 半角数字を全角数字に直すためのテーブルを用意します
+_FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
+
+
+def to_full_width(num: int) -> str:
+    """
+    小学生にもわかる説明：
+      ふつうの数字(半角)を、見た目が広い数字(全角)に変えて返します。
+    """
+    return str(num).translate(_FW_TABLE)
+
 # Windows の IME を制御するための準備（他OSでは使いません）
 _IS_WINDOWS = sys.platform.startswith("win")
 if _IS_WINDOWS:
@@ -884,6 +895,21 @@ class MainWindow(QMainWindow):
             else:
                 filtered = {k: rec.get(k, "") for k in self.widgets.keys()}
                 self.fill_form(filtered)
+                # シリンダー番号を画面に反映します
+                #   Excel の「０色目シリンダー」〜「１０色目シリンダー」の値を
+                #   取り出し、対応する入力欄に代入します。値がない場合は
+                #   空欄のままにします。列名の数字は全角で管理されています。
+                for idx, unit in enumerate(self.cylinder_units):
+                    # 列名に使う数字を全角に変えます
+                    key = f"{to_full_width(idx)}色目シリンダー"
+                    value = rec.get(key, "")
+                    if value is None:
+                        value = ""
+                    else:
+                        value = str(value)
+                    line = unit.cylinder_combo.lineEdit()
+                    if line is not None:
+                        line.setText(value)
                 self.status.showMessage("事前データから読み込みました。", 3000)
         except Exception as e:
             QMessageBox.critical(self, "読み込みエラー", str(e))
