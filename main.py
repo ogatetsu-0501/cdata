@@ -6,7 +6,7 @@
 """
 
 from PySide6 import QtCore, QtGui, QtWidgets
-from PySide6.QtGui import QIntValidator, QDoubleValidator
+from PySide6.QtGui import QIntValidator, QDoubleValidator, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QFileDialog,
@@ -197,10 +197,17 @@ class _SpinnerWidget(QtWidgets.QWidget):
 
 # === シリンダー入力ユニット ===
 class CylinderUnit(QWidget):
-    def __init__(self, get_item_no: Callable[[], str]) -> None:
+    def __init__(
+        self,
+        get_item_no: Callable[[], str],
+        get_candidates: Callable[[str], List[str]],
+    ) -> None:
         """シリンダー情報を1行分まとめる部品です。"""
         super().__init__()
+        # 品目番号を取得する関数を保持します
         self._get_item_no = get_item_no
+        # シリンダー候補を取得する関数を保持します
+        self._get_candidates = get_candidates
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -220,7 +227,15 @@ class CylinderUnit(QWidget):
         self.cylinder_combo.setEditable(True)
         self.cylinder_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self._refresh_cylinder_list()
+        # 9桁の数字のみ入力できるようにします
+        regex = QtCore.QRegularExpression(r"\d{9}")
+        validator = QRegularExpressionValidator(regex)
+        line_edit = self.cylinder_combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setValidator(validator)
+            line_edit.setInputMethodHints(QtCore.Qt.ImhDigitsOnly)
+        # Excel から読み取った候補を表示します
+        self.refresh_cylinder_list()
         row.addWidget(self.cylinder_combo)
 
         # 色名
@@ -268,12 +283,11 @@ class CylinderUnit(QWidget):
 
         self.process_combo.currentTextChanged.connect(self._on_process_changed)
 
-    def _refresh_cylinder_list(self) -> None:
+    def refresh_cylinder_list(self) -> None:
         """品目番号に基づくシリンダー候補を更新します。"""
         self.cylinder_combo.clear()
         item_no = self._get_item_no()
-        candidates = [
-            f"{item_no}-{i}" if item_no else str(i) for i in range(1, 11)]
+        candidates = self._get_candidates(item_no)
         self.cylinder_combo.addItems(candidates)
 
     def _on_process_changed(self, text: str) -> None:
@@ -683,6 +697,10 @@ class MainWindow(QMainWindow):
         """品目番号の入力が変わったときの共通処理です。"""
         self.update_button_states()
 
+        # 既存のシリンダー入力欄の候補を更新します
+        for unit in self.cylinder_units:
+            unit.refresh_cylinder_list()
+
         item_no = text.strip()
         has_file = self.current_xlsm is not None
         is_item_eight_digits = re.fullmatch(r"\d{8}", item_no) is not None
@@ -722,7 +740,7 @@ class MainWindow(QMainWindow):
         count = int(text) if text.isdigit() else 0
         self._clear_cylinder_units()
         for _ in range(count):
-            unit = CylinderUnit(self._get_item_no)
+            unit = CylinderUnit(self._get_item_no, self._get_cylinder_candidates)
             self.cylinder_layout.addWidget(unit)
             self.cylinder_units.append(unit)
         self.update_color_numbers(1)
@@ -736,6 +754,42 @@ class MainWindow(QMainWindow):
         if isinstance(w, QLineEdit):
             return w.text().strip()
         return ""
+
+    def _get_cylinder_candidates(self, item_no: str) -> List[str]:
+        """Excel シートから品目番号に合うシリンダー番号候補を取得します。"""
+        # 事前に読み込んだ「シリンダーデータ」シートを取り出します
+        data = self.preloaded_data.get("シリンダーデータ")
+        if not data:
+            return []
+        # 1行目のヘッダー文字列を取得します
+        headers = [str(v) if v is not None else "" for v in data[0]]
+        if "品目番号" not in headers:
+            return []
+        # シリンダー番号の列名を確認します（存在しない場合は空）
+        cyl_header = "品目番号+刷順列"
+        if cyl_header not in headers:
+            if "品目番号+刷順" in headers:
+                cyl_header = "品目番号+刷順"
+            else:
+                return []
+        idx_item = headers.index("品目番号")
+        idx_cyl = headers.index(cyl_header)
+        result: List[str] = []
+        for row in data[1:]:
+            item_cell = (
+                str(row[idx_item])
+                if idx_item < len(row) and row[idx_item] is not None
+                else ""
+            )
+            if item_cell == item_no:
+                cyl_cell = (
+                    str(row[idx_cyl])
+                    if idx_cyl < len(row) and row[idx_cyl] is not None
+                    else ""
+                )
+                if re.fullmatch(r"\d{9}", cyl_cell):
+                    result.append(cyl_cell)
+        return result
 
     def _clear_cylinder_units(self) -> None:
         """シリンダー入力欄をすべて取り除きます。"""
