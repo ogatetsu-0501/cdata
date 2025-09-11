@@ -897,16 +897,19 @@ class MainWindow(QMainWindow):
                 self.fill_form(filtered)
                 # シリンダー番号を画面に反映します
                 #   Excel の「０色目シリンダー」〜「１０色目シリンダー」の値を
-                #   取り出し、対応する入力欄に代入します。値がない場合は
-                #   空欄のままにします。列名の数字は全角で管理されています。
+                #   調べて、対応する入力欄に順番に入れます。
+                #   ここでは先頭の「０色目シリンダー」に値があるか確認し、
+                #   あれば色番号を０から開始します。なければ色番号を１から
+                #   開始し、「０色目シリンダー」の値は無視します。
+                zero_key = f"{to_full_width(0)}色目シリンダー"  # 「０色目シリンダー」の列名を作ります
+                start = 0 if rec.get(zero_key, "") else 1  # 0番目が空かどうかで開始番号を決めます
+                # 〇色目プルダウンの表示を０または１から始まるように整えます
+                self.update_color_numbers(start)
                 for idx, unit in enumerate(self.cylinder_units):
-                    # 列名に使う数字を全角に変えます
-                    key = f"{to_full_width(idx)}色目シリンダー"
+                    # 列名に使う数字を全角に変え、必要に応じてずらします
+                    key = f"{to_full_width(idx + start)}色目シリンダー"
                     value = rec.get(key, "")
-                    if value is None:
-                        value = ""
-                    else:
-                        value = str(value)
+                    value = "" if value is None else str(value)
                     line = unit.cylinder_combo.lineEdit()
                     if line is not None:
                         line.setText(value)
