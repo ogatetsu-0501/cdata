@@ -814,19 +814,27 @@ class MainWindow(QMainWindow):
 
     def update_color_numbers(self, start: int) -> None:
         """表示される色番号を0または1から順番に並べ直します。"""
-        nums = [str(start + i) for i in range(len(self.cylinder_units))]
+
+        # すべての行に対して、先頭から順番に色番号を設定します
         for idx, unit in enumerate(self.cylinder_units):
-            unit.order_combo.blockSignals(True)
-            unit.order_combo.clear()
+            unit.order_combo.blockSignals(True)  # 値を書き換える間はシグナルを止めます
+            unit.order_combo.clear()             # 以前の選択肢を消します
+
+            # 表示する番号を計算します（start が0なら0から、1なら1から）
+            number = start + idx
+
             if idx == 0:
+                # 先頭の行だけは0と1を選べるようにして、初期値を設定します
                 unit.order_combo.addItems(["0", "1"])
-                unit.order_combo.setCurrentIndex(0 if start == 0 else 1)
+                unit.order_combo.setCurrentText(str(number))
                 unit.order_combo.setEnabled(True)
             else:
-                unit.order_combo.addItem(nums[idx])
+                # 2行目以降は計算した番号を表示し、変更できないようにします
+                unit.order_combo.addItem(str(number))
                 unit.order_combo.setCurrentIndex(0)
                 unit.order_combo.setEnabled(False)
-            unit.order_combo.blockSignals(False)
+
+            unit.order_combo.blockSignals(False)  # シグナルを再び有効にします
 
     def on_first_color_changed(self, text: str) -> None:
         """先頭の色番号が0か1かで全体の番号を調整します。"""
