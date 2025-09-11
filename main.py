@@ -284,9 +284,12 @@ class CylinderUnit(QWidget):
         self.process_combo.currentTextChanged.connect(self._on_process_changed)
 
     def refresh_cylinder_list(self) -> None:
-        """品目番号に基づくシリンダー候補を更新します。"""
+        """Excel シートから取得したシリンダー候補を表示し直します。"""
+        # いったんリストを空にします
         self.cylinder_combo.clear()
+        # 現在入力されている品目番号を取得します（候補自体は品目番号に依存しません）
         item_no = self._get_item_no()
+        # すべての候補を取得してプルダウンに追加します
         candidates = self._get_candidates(item_no)
         self.cylinder_combo.addItems(candidates)
 
@@ -756,39 +759,37 @@ class MainWindow(QMainWindow):
         return ""
 
     def _get_cylinder_candidates(self, item_no: str) -> List[str]:
-        """Excel シートから品目番号に合うシリンダー番号候補を取得します。"""
-        # 事前に読み込んだ「シリンダーデータ」シートを取り出します
+        """Excel シートから『品目番号+刷順列』のすべての値を集めます。
+
+        品目番号は引数として受け取りますが、候補の抽出には利用しません。
+        """
+        # 事前に読み込んだ「シリンダーデータ」シートを取得します
         data = self.preloaded_data.get("シリンダーデータ")
         if not data:
             return []
-        # 1行目のヘッダー文字列を取得します
+        # 1 行目のヘッダー文字列を取得します
         headers = [str(v) if v is not None else "" for v in data[0]]
-        if "品目番号" not in headers:
-            return []
-        # シリンダー番号の列名を確認します（存在しない場合は空）
+        # シリンダー番号が記載された列名を探します
         cyl_header = "品目番号+刷順列"
         if cyl_header not in headers:
             if "品目番号+刷順" in headers:
                 cyl_header = "品目番号+刷順"
             else:
                 return []
-        idx_item = headers.index("品目番号")
         idx_cyl = headers.index(cyl_header)
         result: List[str] = []
+        seen = set()
         for row in data[1:]:
-            item_cell = (
-                str(row[idx_item])
-                if idx_item < len(row) and row[idx_item] is not None
+            # 各行の『品目番号+刷順列』の値を取り出します
+            cyl_cell = (
+                str(row[idx_cyl])
+                if idx_cyl < len(row) and row[idx_cyl] is not None
                 else ""
             )
-            if item_cell == item_no:
-                cyl_cell = (
-                    str(row[idx_cyl])
-                    if idx_cyl < len(row) and row[idx_cyl] is not None
-                    else ""
-                )
-                if re.fullmatch(r"\d{9}", cyl_cell):
-                    result.append(cyl_cell)
+            # 9 桁の数字のみを候補とし、重複は除きます
+            if re.fullmatch(r"\d{9}", cyl_cell) and cyl_cell not in seen:
+                result.append(cyl_cell)
+                seen.add(cyl_cell)
         return result
 
     def _clear_cylinder_units(self) -> None:
