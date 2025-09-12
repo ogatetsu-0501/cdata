@@ -442,6 +442,32 @@ def find_record_by_column(data: List[List[Any]], column: str, value: str) -> Opt
     return None
 
 
+# 別スレッドで検索を行うためのワーカーです。GUI を止めないための仕組みです。
+class FetchWorker(QtCore.QThread):
+    # 検索結果をメインスレッドへ渡すためのシグナルです。
+    finished = QtCore.Signal(object)
+
+    def __init__(self, data: List[List[Any]], column: str, value: str) -> None:
+        # 親クラスの初期化を行います。
+        super().__init__()
+        # 検索対象の表データを保持します。
+        self.data = data
+        # 探索する列名を記録します。
+        self.column = column
+        # 探索したい値を記録します。
+        self.value = value
+
+    def run(self) -> None:
+        # 重い検索処理をここで行います。
+        try:
+            result = find_record_by_column(self.data, self.column, self.value)
+        except Exception as e:
+            # エラーが発生した場合は内容を辞書に入れて返します。
+            result = {"__error__": str(e)}
+        # 検索が終わったらシグナルで結果を返します。
+        self.finished.emit(result)
+
+
 # === マテリアル風のカード ===
 class Card(QFrame):
     def __init__(self, parent=None):
@@ -901,9 +927,47 @@ class MainWindow(QMainWindow):
             self, "xlsm を選んでください", "", "Excel マクロ有効ブック (*.xlsm)")
         return path or None
 
+    # 検索スレッドの完了後に呼び出され、フォームを更新します。
+    @QtCore.Slot(object)
+    def _handle_fetch_result(self, rec: Optional[Dict[str, str]]) -> None:
+        # 例外が渡された場合はエラーとして表示します。
+        if isinstance(rec, dict) and "__error__" in rec:
+            QMessageBox.critical(self, "読み込みエラー", rec["__error__"])
+        elif not rec:
+            # 検索結果が見つからなかった場合の処理です。
+            QMessageBox.information(self, "見つかりません", "新規入力できます。")
+            self.on_clear(keep_item=True)
+        else:
+            # 検索結果をフォームに反映します。
+            filtered = {k: rec.get(k, "") for k in self.widgets.keys()}
+            self.fill_form(filtered)
+            # シリンダー番号を画面に反映します。
+            #   Excel の「０色目シリンダー」〜「１０色目シリンダー」の値を
+            #   調べて、対応する入力欄に順番に入れます。
+            #   ここでは先頭の「０色目シリンダー」に値があるか確認し、
+            #   あれば色番号を０から開始します。なければ色番号を１から
+            #   開始し、「０色目シリンダー」の値は無視します。
+            zero_key = f"{to_full_width(0)}色目シリンダー"  # 「０色目シリンダー」の列名を作ります
+            start = 0 if rec.get(zero_key, "") else 1  # 0番目が空かどうかで開始番号を決めます
+            # 〇色目プルダウンの表示を０または１から始まるように整えます。
+            self.update_color_numbers(start)
+            for idx, unit in enumerate(self.cylinder_units):
+                # 列名に使う数字を全角に変え、必要に応じてずらします。
+                key = f"{to_full_width(idx + start)}色目シリンダー"
+                value = rec.get(key, "")
+                value = "" if value is None else str(value)
+                line = unit.cylinder_combo.lineEdit()
+                if line is not None:
+                    line.setText(value)
+            self.status.showMessage("事前データから読み込みました。", 3000)
+        # 処理にかかった時間を計測して表示します。
+        elapsed = time.perf_counter() - getattr(self, "_fetch_start_time", time.perf_counter())
+        print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
+
     @QtCore.Slot()
     def on_fetch(self):
-        start_time = time.perf_counter()  # 処理開始時刻を記録します
+        # 処理開始時刻を記録します。
+        start_time = time.perf_counter()
         item_no = ""
         if "品目番号" in self.widgets and isinstance(self.widgets["品目番号"], QLineEdit):
             item_no = self.widgets["品目番号"].text().strip()
@@ -927,38 +991,11 @@ class MainWindow(QMainWindow):
             print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
-        try:
-            rec = find_record_by_column(sheet_data, "品目番号", item_no)
-            if rec is None:
-                QMessageBox.information(self, "見つかりません", "新規入力できます。")
-                self.on_clear(keep_item=True)
-            else:
-                filtered = {k: rec.get(k, "") for k in self.widgets.keys()}
-                self.fill_form(filtered)
-                # シリンダー番号を画面に反映します
-                #   Excel の「０色目シリンダー」〜「１０色目シリンダー」の値を
-                #   調べて、対応する入力欄に順番に入れます。
-                #   ここでは先頭の「０色目シリンダー」に値があるか確認し、
-                #   あれば色番号を０から開始します。なければ色番号を１から
-                #   開始し、「０色目シリンダー」の値は無視します。
-                zero_key = f"{to_full_width(0)}色目シリンダー"  # 「０色目シリンダー」の列名を作ります
-                start = 0 if rec.get(zero_key, "") else 1  # 0番目が空かどうかで開始番号を決めます
-                # 〇色目プルダウンの表示を０または１から始まるように整えます
-                self.update_color_numbers(start)
-                for idx, unit in enumerate(self.cylinder_units):
-                    # 列名に使う数字を全角に変え、必要に応じてずらします
-                    key = f"{to_full_width(idx + start)}色目シリンダー"
-                    value = rec.get(key, "")
-                    value = "" if value is None else str(value)
-                    line = unit.cylinder_combo.lineEdit()
-                    if line is not None:
-                        line.setText(value)
-                self.status.showMessage("事前データから読み込みました。", 3000)
-        except Exception as e:
-            QMessageBox.critical(self, "読み込みエラー", str(e))
-        finally:
-            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
-            print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
+        # スレッドを開始し、完了シグナルでフォームを更新します。
+        self._fetch_start_time = start_time
+        self.fetch_worker = FetchWorker(sheet_data, "品目番号", item_no)
+        self.fetch_worker.finished.connect(self._handle_fetch_result)
+        self.fetch_worker.start()
 
     @QtCore.Slot()
     def on_save(self):
