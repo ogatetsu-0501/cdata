@@ -475,6 +475,37 @@ def find_record_by_column(index_map: Dict[str, Dict[str, Dict[str, str]]], colum
     return record
 
 
+# === Excel 検索を別スレッドで行うワーカー ===
+class FetchWorker(QtCore.QThread):
+    """
+    小学生にもわかる説明：
+      このクラスは時間のかかる検索を別のスレッドで行います。
+      これにより画面の操作が止まらないようにします。
+    """
+
+    # 検索結果をメインスレッドへ渡すためのシグナルです。
+    finished = QtCore.Signal(dict)
+
+    def __init__(self, index_map: Dict[str, Dict[str, Dict[str, str]]], item_no: str) -> None:
+        """検索に必要な情報を受け取り、保存します"""
+        super().__init__()
+        # 検索に利用する辞書を覚えておきます
+        self._index_map = index_map
+        # 品目番号も覚えておきます
+        self._item_no = item_no
+
+    def run(self) -> None:
+        """別スレッドで実際の検索を行います"""
+        try:
+            # 重い検索処理をここで行います
+            record = find_record_by_column(self._index_map, "品目番号", self._item_no)
+            # 検索が終わったらシグナルで結果を返します
+            self.finished.emit({"record": record, "item_no": self._item_no})
+        except Exception as e:
+            # エラーが出た場合はエラーメッセージを渡します
+            self.finished.emit({"record": None, "item_no": self._item_no, "error": str(e)})
+
+
 # === マテリアル風のカード ===
 class Card(QFrame):
     def __init__(self, parent=None):
@@ -943,47 +974,64 @@ class MainWindow(QMainWindow):
 
     @QtCore.Slot()
     def on_fetch(self):
-        start_time = time.perf_counter()  # 処理開始時刻を記録します
+        # 処理開始時刻を記録します
+        self._fetch_start_time = time.perf_counter()
+
+        # 入力欄から品目番号を取り出します
         item_no = ""
         if "品目番号" in self.widgets and isinstance(self.widgets["品目番号"], QLineEdit):
             item_no = self.widgets["品目番号"].text().strip()
 
+        # 品目番号が空でないか確認します
         if not item_no:
             QMessageBox.warning(self, "入力エラー", "品目番号を入力してください。")
-            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            elapsed = time.perf_counter() - self._fetch_start_time  # 処理にかかった時間を計算します
             print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
+        # 8桁の数字かどうか確認します
         if re.fullmatch(r"\d{8}", item_no) is None:
             QMessageBox.warning(self, "入力エラー", "品目番号は8桁の半角数字で入力してください。")
-            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            elapsed = time.perf_counter() - self._fetch_start_time  # 処理にかかった時間を計算します
             print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
+        # 事前に作っておいたインデックスを取り出します
         sheet_index = self.record_index.get(self.excel_sheet)
         if not sheet_index:
             QMessageBox.warning(self, "データなし", "事前に読み込んだデータがありません。")
-            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            elapsed = time.perf_counter() - self._fetch_start_time  # 処理にかかった時間を計算します
             print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
-        try:
-            rec = find_record_by_column(sheet_index, "品目番号", item_no)
+        # 別スレッドで検索を行うワーカーを用意します
+        self._fetch_worker = FetchWorker(sheet_index, item_no)
+        # スレッド完了時に結果を受け取る関数をつなぎます
+        self._fetch_worker.finished.connect(self._handle_fetch_result)
+        # スレッドを開始します
+        self._fetch_worker.start()
+
+    def _handle_fetch_result(self, data: dict) -> None:
+        """別スレッドでの検索結果を受け取り、画面を更新します"""
+        # スレッドが終わったので参照を消しておきます
+        self._fetch_worker = None
+
+        # エラーがあればメッセージを表示します
+        if "error" in data:
+            QMessageBox.critical(self, "読み込みエラー", data["error"])
+        else:
+            rec = data.get("record")
             if rec is None:
+                # 見つからなかった場合の処理です
                 QMessageBox.information(self, "見つかりません", "新規入力できます。")
                 self.on_clear(keep_item=True)
             else:
+                # 見つかったレコードをフォームに反映します
                 filtered = {k: rec.get(k, "") for k in self.widgets.keys()}
                 self.fill_form(filtered)
                 # シリンダー番号を画面に反映します
-                #   Excel の「０色目シリンダー」〜「１０色目シリンダー」の値を
-                #   調べて、対応する入力欄に順番に入れます。
-                #   ここでは先頭の「０色目シリンダー」に値があるか確認し、
-                #   あれば色番号を０から開始します。なければ色番号を１から
-                #   開始し、「０色目シリンダー」の値は無視します。
                 zero_key = f"{to_full_width(0)}色目シリンダー"  # 「０色目シリンダー」の列名を作ります
-                start = 0 if rec.get(zero_key, "") else 1  # 0番目が空かどうかで開始番号を決めます
-                # 〇色目プルダウンの表示を０または１から始まるように整えます
+                start = 0 if rec.get(zero_key, "") else 1  # 開始番号を決めます
                 self.update_color_numbers(start)
                 for idx, unit in enumerate(self.cylinder_units):
                     # 列名に使う数字を全角に変え、必要に応じてずらします
@@ -994,11 +1042,10 @@ class MainWindow(QMainWindow):
                     if line is not None:
                         line.setText(value)
                 self.status.showMessage("事前データから読み込みました。", 3000)
-        except Exception as e:
-            QMessageBox.critical(self, "読み込みエラー", str(e))
-        finally:
-            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
-            print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
+
+        # 処理にかかった時間を計算し、ログに表示します
+        elapsed = time.perf_counter() - self._fetch_start_time
+        print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
 
     @QtCore.Slot()
     def on_save(self):
