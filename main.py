@@ -467,6 +467,8 @@ class MainWindow(QMainWindow):
         self.current_xlsm: Optional[str] = self.load_xlsm_path()
 
         self.preloaded_data: Dict[str, List[List[Any]]] = {}
+        # 起動時に計算したシリンダー番号の候補を保存する入れ物です
+        self._cylinder_candidates_cache: List[str] = []
         while self.current_xlsm is not None:
             spinner = LoadingSpinner(self)
             spinner.show()
@@ -505,6 +507,8 @@ class MainWindow(QMainWindow):
                 self.current_xlsm = None
             else:
                 self.preloaded_data = container["data"]
+                # シリンダー番号の候補を起動時に一度だけ計算して保存します
+                self._cylinder_candidates_cache = self._collect_cylinder_candidates()
                 break
 
         if self.current_xlsm is None:
@@ -769,18 +773,19 @@ class MainWindow(QMainWindow):
             return w.text().strip()
         return ""
 
-    def _get_cylinder_candidates(self, item_no: str) -> List[str]:
-        """Excel シートから『品目番号+刷順列』のすべての値を集めます。
-
-        品目番号は引数として受け取りますが、候補の抽出には利用しません。
+    def _collect_cylinder_candidates(self) -> List[str]:
         """
-        # 事前に読み込んだ「シリンダーデータ」シートを取得します
+        小学生にもわかる説明：
+          Excel の「シリンダーデータ」からシリンダー番号の候補を
+          一度だけ集めて覚えておきます。
+        """
+        # 事前に読み込んだ「シリンダーデータ」シートを取り出します
         data = self.preloaded_data.get("シリンダーデータ")
         if not data:
             return []
-        # 1 行目のヘッダー文字列を取得します
+        # 1 行目から列名を集めます
         headers = [str(v) if v is not None else "" for v in data[0]]
-        # シリンダー番号が記載された列名を探します
+        # 「品目番号+刷順列」の列を探します。古い列名にも対応します
         cyl_header = "品目番号+刷順列"
         if cyl_header not in headers:
             if "品目番号+刷順" in headers:
@@ -790,18 +795,26 @@ class MainWindow(QMainWindow):
         idx_cyl = headers.index(cyl_header)
         result: List[str] = []
         seen = set()
+        # 2 行目以降を順番に調べて、9桁の数字だけを重複なく集めます
         for row in data[1:]:
-            # 各行の『品目番号+刷順列』の値を取り出します
             cyl_cell = (
                 str(row[idx_cyl])
                 if idx_cyl < len(row) and row[idx_cyl] is not None
                 else ""
             )
-            # 9 桁の数字のみを候補とし、重複は除きます
             if re.fullmatch(r"\d{9}", cyl_cell) and cyl_cell not in seen:
                 result.append(cyl_cell)
                 seen.add(cyl_cell)
         return result
+
+    def _get_cylinder_candidates(self, item_no: str) -> List[str]:
+        """
+        小学生にもわかる説明：
+          起動時に集めたシリンダー番号の候補をそのまま返します。
+          品目番号は受け取りますが計算には使いません。
+        """
+        # 起動時に計算しておいた候補を返します
+        return self._cylinder_candidates_cache
 
     def _clear_cylinder_units(self) -> None:
         """シリンダー入力欄をすべて取り除きます。"""
