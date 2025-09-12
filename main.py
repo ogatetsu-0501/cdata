@@ -27,6 +27,9 @@ import time  # 時間を測るためのモジュールです
 # 半角数字を全角数字に直すためのテーブルを用意します
 _FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
 
+# 検索に利用する列名です。必要に応じて増やしてください。
+SEARCH_COLUMNS = ["品目番号"]
+
 
 def to_full_width(num: int) -> str:
     """
@@ -417,29 +420,59 @@ def _extract_range_from_sheet(ws) -> List[List[Any]]:
         data.append(row_values)
     return data
 
+# === 辞書作成と検索の処理例 ===
+# 辞書を作成する処理です。品目番号をキーにします。
+# record_index = {row_key: row_data for row_key, row_data in ...}
+#
+# 辞書から該当レコードを取得します。存在しない場合は None を返します。
+# result = record_index.get(search_value)
+# ===================================
 
-def find_record_by_column(data: List[List[Any]], column: str, value: str) -> Optional[Dict[str, str]]:
-    start_time = time.perf_counter()  # 処理開始時刻を記録します
+def build_record_index(data: List[List[Any]], columns: List[str]) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """
+    小学生にもわかる説明：
+      表の1行目を見出しにして、指定された列の値をキーにした辞書を作ります。
+      この辞書を使うと、同じ列を1行ずつ調べるより速く探せます。
+    """
+    # 返り値の入れ物を用意します
+    index: Dict[str, Dict[str, Dict[str, str]]] = {}
     if not data:
-        elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
-        print(f"[LOG] find_record_by_column: {elapsed:.3f} 秒")  # かかった時間を表示します
-        return None
+        return index
+
+    # 1行目は見出しなので文字に直しておきます
     headers = [str(v) if v is not None else "" for v in data[0]]
-    if column not in headers:
-        raise ValueError(f"『{column}』の列が見つかりません")
-    idx = headers.index(column)
-    for row in data[1:]:
-        cell_value = ""
-        if idx < len(row) and row[idx] is not None:
-            cell_value = str(row[idx])
-        if cell_value == value:
-            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
-            print(f"[LOG] find_record_by_column: {elapsed:.3f} 秒")  # かかった時間を表示します
-            return {h: (str(row[i]) if i < len(row) and row[i] is not None else "")
-                    for i, h in enumerate(headers) if h}
+
+    for column in columns:
+        # 欲しい列が無い場合は飛ばします
+        if column not in headers:
+            continue
+        idx = headers.index(column)
+        col_dict: Dict[str, Dict[str, str]] = {}
+        for row in data[1:]:
+            # 行から品目番号などのキーを取り出します
+            if idx < len(row) and row[idx] is not None:
+                key = str(row[idx])
+                # 行全体を {列名: 値} の辞書に変換します
+                col_dict[key] = {h: (str(row[i]) if i < len(row) and row[i] is not None else "")
+                                 for i, h in enumerate(headers) if h}
+        index[column] = col_dict
+    return index
+
+
+def find_record_by_column(index_map: Dict[str, Dict[str, Dict[str, str]]], column: str, value: str) -> Optional[Dict[str, str]]:
+    """
+    小学生にもわかる説明：
+      作っておいた辞書から、ほしい値の行をすぐに取り出します。
+      その値が無ければ、何も見つからなかった印として None を返します。
+    """
+    start_time = time.perf_counter()  # 処理開始時刻を記録します
+    # 指定された列の辞書を取り出します
+    column_dict = index_map.get(column, {})
+    # 辞書から直接レコードを取り出します。存在しなければ None です
+    record = column_dict.get(value)
     elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
     print(f"[LOG] find_record_by_column: {elapsed:.3f} 秒")  # かかった時間を表示します
-    return None
+    return record
 
 
 # === マテリアル風のカード ===
@@ -475,6 +508,8 @@ class MainWindow(QMainWindow):
         self.current_xlsm: Optional[str] = self.load_xlsm_path()
 
         self.preloaded_data: Dict[str, List[List[Any]]] = {}
+        # 検索を速くするための辞書を保存する入れ物です
+        self.record_index: Dict[str, Dict[str, Dict[str, Dict[str, str]]]] = {}
         # 起動時に計算したシリンダー番号の候補を保存する入れ物です
         self._cylinder_candidates_cache: List[str] = []
         while self.current_xlsm is not None:
@@ -515,6 +550,11 @@ class MainWindow(QMainWindow):
                 self.current_xlsm = None
             else:
                 self.preloaded_data = container["data"]
+                # 辞書を作成する処理です。品目番号をキーにします。
+                self.record_index = {
+                    sheet: build_record_index(rows, SEARCH_COLUMNS)
+                    for sheet, rows in self.preloaded_data.items()
+                }
                 # シリンダー番号の候補を起動時に一度だけ計算して保存します
                 self._cylinder_candidates_cache = self._collect_cylinder_candidates()
                 break
@@ -751,11 +791,11 @@ class MainWindow(QMainWindow):
 
         save_text = "新規登録"
         if item_text and has_file:
-            sheet_data = self.preloaded_data.get(self.excel_sheet)
-            if sheet_data:
+            sheet_index = self.record_index.get(self.excel_sheet)
+            if sheet_index:
                 try:
                     exists = find_record_by_column(
-                        sheet_data, "品目番号", item_text)
+                        sheet_index, "品目番号", item_text)
                     if exists is not None:
                         save_text = "上書き保存"
                 except Exception:
@@ -920,15 +960,15 @@ class MainWindow(QMainWindow):
             print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
-        sheet_data = self.preloaded_data.get(self.excel_sheet)
-        if not sheet_data:
+        sheet_index = self.record_index.get(self.excel_sheet)
+        if not sheet_index:
             QMessageBox.warning(self, "データなし", "事前に読み込んだデータがありません。")
             elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
             print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
         try:
-            rec = find_record_by_column(sheet_data, "品目番号", item_no)
+            rec = find_record_by_column(sheet_index, "品目番号", item_no)
             if rec is None:
                 QMessageBox.information(self, "見つかりません", "新規入力できます。")
                 self.on_clear(keep_item=True)
@@ -980,19 +1020,24 @@ class MainWindow(QMainWindow):
 
             sheet_data = self.preloaded_data.get(self.excel_sheet)
             if sheet_data:
-                headers = [
-                    str(v) if v is not None else "" for v in sheet_data[0]]
+                headers = [str(v) if v is not None else "" for v in sheet_data[0]]
                 row = [data.get(h, "") for h in headers]
+                item_key = data.get("品目番号", "")
                 if "品目番号" in headers:
                     idx = headers.index("品目番号")
                     for i in range(1, len(sheet_data)):
                         cell = sheet_data[i][idx]
                         cell_text = str(cell) if cell is not None else ""
-                        if cell_text == data.get("品目番号", ""):
+                        if cell_text == item_key:
                             sheet_data[i] = row
                             break
                     else:
                         sheet_data.append(row)
+                # 辞書の内容も更新します
+                sheet_index = self.record_index.setdefault(self.excel_sheet, {}).setdefault("品目番号", {})
+                record_dict = {h: data.get(h, "") for h in headers if h}
+                if item_key:
+                    sheet_index[item_key] = record_dict
 
             self.update_button_states()
         except Exception as e:
