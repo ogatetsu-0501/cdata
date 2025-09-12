@@ -22,6 +22,7 @@ import os
 import re
 from typing import Dict, Optional, Any, List, Callable
 import threading
+import time  # 時間を測るためのモジュールです
 
 # 半角数字を全角数字に直すためのテーブルを用意します
 _FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
@@ -418,7 +419,10 @@ def _extract_range_from_sheet(ws) -> List[List[Any]]:
 
 
 def find_record_by_column(data: List[List[Any]], column: str, value: str) -> Optional[Dict[str, str]]:
+    start_time = time.perf_counter()  # 処理開始時刻を記録します
     if not data:
+        elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+        print(f"[LOG] find_record_by_column: {elapsed:.3f} 秒")  # かかった時間を表示します
         return None
     headers = [str(v) if v is not None else "" for v in data[0]]
     if column not in headers:
@@ -429,8 +433,12 @@ def find_record_by_column(data: List[List[Any]], column: str, value: str) -> Opt
         if idx < len(row) and row[idx] is not None:
             cell_value = str(row[idx])
         if cell_value == value:
+            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            print(f"[LOG] find_record_by_column: {elapsed:.3f} 秒")  # かかった時間を表示します
             return {h: (str(row[i]) if i < len(row) and row[i] is not None else "")
                     for i, h in enumerate(headers) if h}
+    elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+    print(f"[LOG] find_record_by_column: {elapsed:.3f} 秒")  # かかった時間を表示します
     return None
 
 
@@ -712,6 +720,7 @@ class MainWindow(QMainWindow):
                 continue
 
     def on_item_no_changed(self, text: str) -> None:
+        start_time = time.perf_counter()  # 処理開始時刻を記録します
         """品目番号の入力が変わったときの共通処理です。"""
         self.update_button_states()
 
@@ -726,6 +735,9 @@ class MainWindow(QMainWindow):
         if has_file and is_item_eight_digits and item_no != self._last_fetched_item:
             self.on_fetch()
             self._last_fetched_item = item_no
+
+        elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+        print(f"[LOG] on_item_no_changed: {elapsed:.3f} 秒")  # かかった時間を表示します
 
     def update_button_states(self) -> None:
         """入力内容に応じて『保存』ボタンの状態を切り替えます。"""
@@ -891,21 +903,28 @@ class MainWindow(QMainWindow):
 
     @QtCore.Slot()
     def on_fetch(self):
+        start_time = time.perf_counter()  # 処理開始時刻を記録します
         item_no = ""
         if "品目番号" in self.widgets and isinstance(self.widgets["品目番号"], QLineEdit):
             item_no = self.widgets["品目番号"].text().strip()
 
         if not item_no:
             QMessageBox.warning(self, "入力エラー", "品目番号を入力してください。")
+            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
         if re.fullmatch(r"\d{8}", item_no) is None:
             QMessageBox.warning(self, "入力エラー", "品目番号は8桁の半角数字で入力してください。")
+            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
         sheet_data = self.preloaded_data.get(self.excel_sheet)
         if not sheet_data:
             QMessageBox.warning(self, "データなし", "事前に読み込んだデータがありません。")
+            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
             return
 
         try:
@@ -937,6 +956,9 @@ class MainWindow(QMainWindow):
                 self.status.showMessage("事前データから読み込みました。", 3000)
         except Exception as e:
             QMessageBox.critical(self, "読み込みエラー", str(e))
+        finally:
+            elapsed = time.perf_counter() - start_time  # 処理にかかった時間を計算します
+            print(f"[LOG] on_fetch: {elapsed:.3f} 秒")  # かかった時間を表示します
 
     @QtCore.Slot()
     def on_save(self):
