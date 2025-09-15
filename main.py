@@ -299,8 +299,15 @@ class CylinderUnit(QWidget):
         self.process_combo.currentTextChanged.connect(self._on_process_changed)
 
     def refresh_cylinder_list(self) -> None:
-        """Excel シートから取得したシリンダー候補を表示し直します。"""
-        # いったんリストを空にします
+        """
+        Excel シートから取得したシリンダー候補を表示し直します。
+        起動時に読み込んだ候補がすでに存在する場合は、無駄な再設定を避けます。
+        """
+        # すでに候補が設定されている場合は、これ以上の処理を行いません
+        if self.cylinder_combo.count() > 0:
+            return
+
+        # いったんリストを空にします（初回のみ実行されます）
         self.cylinder_combo.clear()
         # 現在入力されている品目番号を取得します（候補自体は品目番号に依存しません）
         item_no = self._get_item_no()
@@ -795,9 +802,8 @@ class MainWindow(QMainWindow):
         """品目番号の入力が変わったときの共通処理です。"""
         self.update_button_states()
 
-        # 既存のシリンダー入力欄の候補を更新します
-        for unit in self.cylinder_units:
-            unit.refresh_cylinder_list()
+        # シリンダー番号の候補は起動時に読み込まれるため、
+        # ここでの再読み込みは行いません
 
         item_no = text.strip()
         has_file = self.current_xlsm is not None
