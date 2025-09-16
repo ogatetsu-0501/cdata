@@ -23,6 +23,7 @@ import re
 from typing import Dict, Optional, Any, List, Callable
 import threading
 import time  # 時間を測るためのモジュールです
+import importlib  # 追加のモジュールを読み込むための道具です
 
 # 半角数字を全角数字に直すためのテーブルを用意します
 _FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
@@ -321,6 +322,63 @@ class CylinderUnit(QWidget):
 
 
 # === Excel の読み書き関数（省略なし・そのまま） ===
+def _close_excel_workbook_if_open(path: str) -> None:
+    """指定された Excel ファイルが開いていれば保存して閉じます"""
+    # 初学者向け説明：Windows だけが Excel を自動操作できるので対象 OS かどうか確認します。
+    if not _IS_WINDOWS:
+        return
+
+    # 初学者向け説明：win32com.client が準備できない場合は自動操作を諦めます。
+    spec = importlib.util.find_spec("win32com.client")
+    if spec is None:
+        return
+
+    # 初学者向け説明：実際に win32com.client を読み込み、動作中の Excel を探します。
+    win32_client = importlib.import_module("win32com.client")
+    try:
+        excel = win32_client.GetActiveObject("Excel.Application")
+    except Exception:
+        return
+
+    # 初学者向け説明：比較を簡単にするため、パスを正規化します。
+    target = os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+    try:
+        workbooks = excel.Workbooks
+        count = workbooks.Count
+    except Exception:
+        return
+
+    # 初学者向け説明：開いているブックを後ろから調べ、目的のファイルがあれば保存して閉じます。
+    for idx in range(count, 0, -1):
+        try:
+            workbook = workbooks.Item(idx)
+        except Exception:
+            continue
+
+        try:
+            current = os.path.normcase(os.path.normpath(str(workbook.FullName)))
+        except Exception:
+            continue
+
+        if current != target:
+            continue
+
+        try:
+            workbook.Save()
+        except Exception:
+            pass
+
+        try:
+            workbook.Close(SaveChanges=False)
+        except Exception:
+            try:
+                workbook.Close()
+            except Exception:
+                pass
+        break
+
+
 def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[Dict[str, str]]:
     wb = load_workbook(path, keep_vba=True, data_only=False)
     if sheet_name not in wb.sheetnames:
@@ -350,7 +408,17 @@ def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[
 
 
 def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str) -> None:
-    wb = load_workbook(path, keep_vba=True, data_only=False)
+    # 初学者向け説明：保存作業の前に Excel が開いていれば自動で閉じて安全にします。
+    _close_excel_workbook_if_open(path)
+
+    try:
+        wb = load_workbook(path, keep_vba=True, data_only=False)
+    except PermissionError as e:
+        # 初学者向け説明：どうしてもファイルを開けなかった場合は、手動で閉じてもらうよう案内します。
+        raise PermissionError(
+            "Excel が開いている可能性があります。Excel を手動で閉じてから再度お試しください。"
+        ) from e
+
     if sheet_name not in wb.sheetnames:
         raise ValueError(f"シート『{sheet_name}』がありません")
     ws = wb[sheet_name]
