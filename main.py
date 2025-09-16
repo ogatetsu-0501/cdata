@@ -350,6 +350,119 @@ def _close_excel_workbook_if_open(path: str) -> None:
         break
 
 
+def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
+                           save_mode: str) -> bool:
+    """可能なら Excel 本体を使って安全に保存します。"""
+    # 初学者向け説明：Windows 以外では Excel を直接操作できないので処理を打ち切ります。
+    if not _IS_WINDOWS:
+        return False
+
+    # 初学者向け説明：win32com.client を見つけられなければ Excel の自動操作はできません。
+    spec = importlib.util.find_spec("win32com.client")
+    if spec is None:
+        return False
+
+    # 初学者向け説明：実際に win32com.client を読み込み、Excel を起動（または接続）します。
+    win32_client = importlib.import_module("win32com.client")
+    excel = None
+    workbook = None
+    try:
+        try:
+            excel = win32_client.DispatchEx("Excel.Application")
+        except Exception:
+            try:
+                excel = win32_client.Dispatch("Excel.Application")
+            except Exception:
+                return False
+
+        # 初学者向け説明：画面に表示せず、警告も出さないように設定します。
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        try:
+            workbook = excel.Workbooks.Open(path)
+        except Exception:
+            return False
+
+        try:
+            worksheet = workbook.Worksheets(sheet_name)
+        except Exception as exc:
+            raise ValueError(f"シート『{sheet_name}』がありません") from exc
+
+        # 初学者向け説明：見出し行（1行目）を調べ、列名から列番号の辞書を作ります。
+        header_map: Dict[str, int] = {}
+        xl_to_left = -4159  # Excel 定数：左方向へ移動（xlToLeft）
+        try:
+            last_header_col = int(worksheet.Cells(1, worksheet.Columns.Count)
+                                  .End(xl_to_left).Column)
+        except Exception:
+            last_header_col = 0
+        if last_header_col < 0:
+            last_header_col = 0
+        for col in range(1, last_header_col + 1):
+            header_value = worksheet.Cells(1, col).Value
+            if header_value is not None:
+                header_map[str(header_value)] = col
+
+        # 初学者向け説明：必要な列が無ければ保存できないのでエラーにします。
+        if "品目番号" not in header_map:
+            raise ValueError("『品目番号』の列が見つかりません")
+
+        item_column = header_map["品目番号"]
+        xl_up = -4162  # Excel 定数：上方向へ移動（xlUp）
+        try:
+            last_filled_row = int(worksheet.Cells(worksheet.Rows.Count, item_column)
+                                  .End(xl_up).Row)
+        except Exception:
+            last_filled_row = 1
+        if last_filled_row < 1:
+            last_filled_row = 1
+
+        # 初学者向け説明：上書き保存の場合は既存行を探し、新規の場合は最後尾に追加します。
+        target_row: Optional[int] = None
+        item_value = data.get("品目番号", "")
+        if save_mode == "上書き保存":
+            for row in range(2, last_filled_row + 1):
+                cell_value = worksheet.Cells(row, item_column).Value
+                if str(cell_value or "").strip() == item_value:
+                    target_row = row
+                    break
+            if target_row is None:
+                raise ValueError("上書き対象の行が見つかりません。先に該当データを読み込んでください。")
+        else:
+            target_row = last_filled_row + 1
+
+        # 初学者向け説明：辞書の値を文字列に直しながら各セルへ書き込みます。
+        for key, value in data.items():
+            column = header_map.get(key)
+            if column is None:
+                continue
+            worksheet.Cells(target_row, column).Value = "" if value is None else str(value)
+
+        # 初学者向け説明：ここまでの変更を Excel に保存します。
+        workbook.Save()
+        return True
+
+    except ValueError:
+        # 初学者向け説明：入力不足など明確なエラーはそのまま呼び出し元へ伝えます。
+        raise
+    except Exception:
+        # 初学者向け説明：想定外のエラーは Excel 保存に失敗したとして、後段の処理へ委ねます。
+        return False
+    finally:
+        # 初学者向け説明：Excel を起動したままにしないよう、必ず後片付けします。
+        if workbook is not None:
+            try:
+                workbook.Close(SaveChanges=False)
+            except Exception:
+                pass
+        if excel is not None:
+            try:
+                excel.Quit()
+            except Exception:
+                pass
+
+
 def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[Dict[str, str]]:
     wb = load_workbook(path, keep_vba=True, data_only=False)
     if sheet_name not in wb.sheetnames:
@@ -381,6 +494,10 @@ def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[
 def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save_mode: str) -> None:
     # 初学者向け説明：保存作業の前に Excel が開いていれば自動で閉じて安全にします。
     _close_excel_workbook_if_open(path)
+
+    # 初学者向け説明：Windows + Excel が使えるなら Excel 本体に保存を任せます。
+    if _try_upsert_with_excel(path, data, sheet_name, save_mode):
+        return
 
     try:
         wb = load_workbook(path, keep_vba=True, data_only=False)
