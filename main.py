@@ -654,6 +654,7 @@ class MainWindow(QMainWindow):
         self.cylinder_layout = QVBoxLayout()
         self.cylinder_layout.setSpacing(8)
 
+        # 入力欄の見出しを横一列に並べるためのレイアウトを準備します
         self.cylinder_header = QHBoxLayout()
         header_labels = ["〇色目", "シリンダー番号", "色名", "ベタ巾", "旧版処理"]
         for text in header_labels:
@@ -662,7 +663,14 @@ class MainWindow(QMainWindow):
             self.cylinder_header.addWidget(lbl)
         self.cylinder_layout.addLayout(self.cylinder_header)
 
+        # 入力欄を作成中であることを知らせるラベルを用意し、普段は隠しておきます
+        self.cylinder_status_label = QLabel("")
+        self.cylinder_status_label.hide()
+        self.cylinder_layout.addWidget(self.cylinder_status_label)
+
         self.cylinder_units: List[CylinderUnit] = []
+        # 先頭の色番号コンボがどれかを覚えて、不要な二重接続を避けます
+        self._first_order_combo: Optional[QComboBox] = None
 
         wrap.addLayout(self.grid)
         wrap.addWidget(self.cyl_title)
@@ -844,16 +852,33 @@ class MainWindow(QMainWindow):
 
     def on_color_count_changed(self, text: str) -> None:
         """色数に応じてシリンダー入力欄を増減させます。"""
-        count = int(text) if text.isdigit() else 0
-        self._clear_cylinder_units()
-        for _ in range(count):
-            unit = CylinderUnit(self._get_item_no, self._get_cylinder_candidates)
-            self.cylinder_layout.addWidget(unit)
-            self.cylinder_units.append(unit)
-        self.update_color_numbers(1)
-        if self.cylinder_units:
-            first = self.cylinder_units[0].order_combo
-            first.currentTextChanged.connect(self.on_first_color_changed)
+        # 数字に変換できない入力は 0 色として扱います
+        new_count = int(text) if text.isdigit() else 0
+        current_count = len(self.cylinder_units)
+
+        # 件数が変わっていないときは何もしません
+        if new_count == current_count:
+            return
+
+        # 入力欄を作成・削除していることを画面に表示します
+        self._set_generation_status(True)
+        try:
+            if new_count > current_count:
+                # 増えた分だけ新しいシリンダー入力行を追加します
+                for _ in range(new_count - current_count):
+                    unit = CylinderUnit(self._get_item_no, self._get_cylinder_candidates)
+                    self.cylinder_layout.addWidget(unit)
+                    self.cylinder_units.append(unit)
+            else:
+                # 減った分だけ後ろから入力行を削除します
+                self._remove_cylinder_units(current_count - new_count)
+
+            # 色番号を 1 から順番に並べ、必要なら 0 も選べるようにします
+            self.update_color_numbers(1)
+        finally:
+            # 先頭行のシグナル接続を整理し、完了後にメッセージを消します
+            self._refresh_first_color_signal()
+            self._set_generation_status(False)
 
     def _get_item_no(self) -> str:
         """現在入力されている品目番号を取得します。"""
@@ -907,12 +932,47 @@ class MainWindow(QMainWindow):
 
     def _clear_cylinder_units(self) -> None:
         """シリンダー入力欄をすべて取り除きます。"""
-        while self.cylinder_layout.count() > 1:
-            item = self.cylinder_layout.takeAt(1)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-        self.cylinder_units = []
+        # いま残っている行数ぶんだけ削除し、リストも空にします
+        self._remove_cylinder_units(len(self.cylinder_units))
+        self._refresh_first_color_signal()
+
+    def _remove_cylinder_units(self, count: int) -> None:
+        """指定された数だけ末尾からシリンダー入力欄を削除します。"""
+        # 削除数が現在の行数を超えないように調整します
+        removal_count = min(count, len(self.cylinder_units))
+        for _ in range(removal_count):
+            unit = self.cylinder_units.pop()
+            # レイアウトから取り外し、ウィジェットを破棄します
+            self.cylinder_layout.removeWidget(unit)
+            unit.deleteLater()
+
+    def _refresh_first_color_signal(self) -> None:
+        """先頭行のシグナル接続を整理して過剰な呼び出しを防ぎます。"""
+        # 以前に覚えていた先頭のコンボボックスとの接続を外します
+        if self._first_order_combo is not None:
+            try:
+                self._first_order_combo.currentTextChanged.disconnect(self.on_first_color_changed)
+            except TypeError:
+                pass
+            self._first_order_combo = None
+
+        # 新しく先頭が存在する場合だけ接続し直します
+        if self.cylinder_units:
+            first_combo = self.cylinder_units[0].order_combo
+            first_combo.currentTextChanged.connect(self.on_first_color_changed)
+            self._first_order_combo = first_combo
+
+    def _set_generation_status(self, visible: bool) -> None:
+        """入力欄生成中のメッセージ表示を切り替えます。"""
+        if visible:
+            # ラベルに文字を入れて表示し、すぐに画面へ反映させます
+            self.cylinder_status_label.setText("入力欄生成中....")
+            self.cylinder_status_label.show()
+            QtWidgets.QApplication.processEvents()
+        else:
+            # 作業が終わったら文字を消して非表示に戻します
+            self.cylinder_status_label.clear()
+            self.cylinder_status_label.hide()
 
     def update_color_numbers(self, start: int) -> None:
         """表示される色番号を0または1から順番に並べ直します。"""
