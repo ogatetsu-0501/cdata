@@ -267,37 +267,11 @@ class CylinderUnit(QWidget):
         self.width_edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
         row.addWidget(self.width_edit)
 
-        # 旧版処理
-        self.process_combo = QComboBox()
-        self.process_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.process_combo.addItems([
-            "変更無し",
-            "同名製版",
-            "落組行き",
-            "名義変更",
-            "廃棄行き",
-        ])
-        row.addWidget(self.process_combo)
-
         # 左寄せ＆はみ出し防止を適用
         setup_left_aligned_combo(self.order_combo)
         setup_left_aligned_combo(self.cylinder_combo)
-        setup_left_aligned_combo(self.process_combo)
 
         layout.addLayout(row)
-
-        # 名義変更時のみ表示する欄（数値）
-        self.rename_edit = NumericLineEdit()
-        iv = QIntValidator(0, 999999999)
-        iv.setLocale(QtCore.QLocale("C"))
-        self.rename_edit.setValidator(iv)
-        self.rename_edit.setInputMethodHints(QtCore.Qt.ImhDigitsOnly)
-        self.rename_edit.setPlaceholderText("名義変更先の番号")
-        self.rename_edit.hide()
-        layout.addWidget(self.rename_edit)
-
-        self.process_combo.currentTextChanged.connect(self._on_process_changed)
 
     def refresh_cylinder_list(self) -> None:
         """
@@ -316,9 +290,6 @@ class CylinderUnit(QWidget):
         candidates = self._get_candidates(item_no)
         self.cylinder_combo.addItems(candidates)
 
-    def _on_process_changed(self, text: str) -> None:
-        """旧版処理の内容によって追加欄を表示します。"""
-        self.rename_edit.setVisible(text == "名義変更")
 
 
 # === Excel の読み書き関数（省略なし・そのまま） ===
@@ -737,7 +708,7 @@ class MainWindow(QMainWindow):
 
         # 入力欄の見出しを横一列に並べるためのレイアウトを準備します
         self.cylinder_header = QHBoxLayout()
-        header_labels = ["〇色目", "シリンダー番号", "色名", "ベタ巾", "旧版処理"]
+        header_labels = ["〇色目", "シリンダー番号", "色名", "ベタ巾"]
         for text in header_labels:
             lbl = QLabel(text)
             lbl.setStyleSheet("font-weight:600;")
