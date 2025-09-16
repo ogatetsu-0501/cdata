@@ -407,7 +407,7 @@ def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[
             for name in header_map.keys()}
 
 
-def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str) -> None:
+def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save_mode: str) -> None:
     # 初学者向け説明：保存作業の前に Excel が開いていれば自動で閉じて安全にします。
     _close_excel_workbook_if_open(path)
 
@@ -438,8 +438,21 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str) -> N
         if str(ws.cell(row=r, column=col_item).value or "") == data.get("品目番号", ""):
             target_row = r
             break
-    if target_row is None:
-        target_row = ws.max_row + 1
+
+    # 初学者向け説明：保存ボタンの種類によって、書き込む行を決めます。
+    if save_mode == "上書き保存":
+        # 初学者向け説明：上書き保存なのに対象が無ければ、操作を止めて利用者へ知らせます。
+        if target_row is None:
+            raise ValueError("上書き対象の行が見つかりません。先に該当データを読み込んでください。")
+    else:
+        # 初学者向け説明：新規登録では品目番号列の最後に続けて書き込む行を探します。
+        last_filled_row = 1
+        for r in range(ws.max_row, 1, -1):
+            value = ws.cell(row=r, column=col_item).value
+            if value not in (None, ""):
+                last_filled_row = r
+                break
+        target_row = last_filled_row + 1
 
     for k, v in data.items():
         c = header_map.get(k)
@@ -1072,13 +1085,39 @@ class MainWindow(QMainWindow):
         self.update_color_numbers(start)
 
     def collect_form_data(self) -> Dict[str, str]:
+        # 初学者向け説明：画面の入力欄からテキストを集めて、Excelに渡す準備をします。
         d: Dict[str, str] = {}
         for k, w in self.widgets.items():
             if isinstance(w, QPlainTextEdit):
                 d[k] = w.toPlainText().strip()
             elif isinstance(w, QLineEdit):
                 d[k] = w.text().strip()
+
+        # 初学者向け説明：シリンダー番号も専用の列へ入れられるように集めます。
+        d.update(self._collect_cylinder_form_data())
         return d
+
+    def _collect_cylinder_form_data(self) -> Dict[str, str]:
+        # 初学者向け説明：０色目から１０色目の列名を先に用意し、何も無ければ空欄にしておきます。
+        cylinder_data: Dict[str, str] = {
+            f"{to_full_width(order)}色目シリンダー": "" for order in range(0, 11)
+        }
+
+        # 初学者向け説明：各行の入力欄から番号を取り出し、対応する列へ入れます。
+        for unit in self.cylinder_units:
+            order_text = unit.order_combo.currentText().strip()
+            if not order_text.isdigit():
+                continue
+
+            order = int(order_text)
+            if 0 <= order <= 10:
+                line = unit.cylinder_combo.lineEdit()
+                value = ""
+                if line is not None:
+                    value = line.text().strip()
+                cylinder_data[f"{to_full_width(order)}色目シリンダー"] = value
+
+        return cylinder_data
 
     def fill_form(self, data: Dict[str, str]) -> None:
         for k, w in self.widgets.items():
@@ -1194,8 +1233,14 @@ class MainWindow(QMainWindow):
                 "データファイルが設定されていないため、保存できません。"
             )
             return
+
+        # 初学者向け説明：ボタンに表示されている文字で、新規登録か上書きかを判断します。
+        save_mode = "新規登録"
+        if self.save_button is not None:
+            save_mode = self.save_button.text().strip() or save_mode
+
         try:
-            upsert_record_to_xlsm(self.current_xlsm, data, self.excel_sheet)
+            upsert_record_to_xlsm(self.current_xlsm, data, self.excel_sheet, save_mode)
             self.status.showMessage("Excel に保存しました。", 3000)
             QMessageBox.information(self, "保存", "保存が完了しました。")
 
