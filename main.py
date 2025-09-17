@@ -380,7 +380,13 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
         excel.DisplayAlerts = False
 
         try:
-            workbook = excel.Workbooks.Open(path)
+            # 初学者にもわかる説明：Excel が「読み取り専用で開きますか？」と聞いてこないように、
+            #   あらかじめ編集できる設定でブックを開くよう命令します。
+            workbook = excel.Workbooks.Open(
+                path,
+                ReadOnly=False,
+                IgnoreReadOnlyRecommended=True,
+            )
         except Exception:
             return False
 
