@@ -27,6 +27,8 @@ import time  # 時間を測るためのモジュールです
 
 # 半角数字を全角数字に直すためのテーブルを用意します
 _FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
+# 初学者向け説明：Excel 内の数値は半角数字として届くので、全角と半角をそろえる逆変換も作っておきます。
+_HW_TABLE = str.maketrans("０１２３４５６７８９", "0123456789")
 
 # ログファイルを置く場所と名前を決めます
 _LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
@@ -130,12 +132,24 @@ def _normalize_cell_text(value: Any) -> str:
     if value is None:
         return ""
 
-    # 初学者向け説明：数値の場合は 4.0 → 4 のように余計な小数を取り除きます。
+    # 初学者向け説明：まず文字列にして両端の空白を取り除きます。
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    # 初学者向け説明：全角数字が含まれていても比較できるよう半角にそろえます。
+    text = text.translate(_HW_TABLE)
+
+    # 初学者向け説明：小数点を含まない純粋な数字は、001 → 1 のように共通の姿へ整えます。
+    if text.isdigit():
+        return str(int(text))
+
+    # 初学者向け説明：値が小数だった場合は 4.0 → 4 のように余計な .0 を取り除きます。
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
 
-    # 初学者向け説明：それ以外は文字列化して返します。
-    return str(value)
+    # 初学者向け説明：それ以外は整えた文字列をそのまま返します。
+    return text
 
 
 def _build_header_map_from_sheet(ws) -> Dict[str, int]:
@@ -453,10 +467,15 @@ def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name
 
         if save_mode == "上書き保存":
             # 初学者向け説明：品目番号が一致する最初の行を上から順に探します。
-            item_value = normalized_data.get("品目番号", "")
+            raw_item_value = normalized_data.get("品目番号", "")
+            # 初学者向け説明：比較用に全角半角や先頭の 0 を統一した値を作ります。
+            normalized_item_value = _normalize_cell_text(raw_item_value)
+            if not normalized_item_value:
+                raise ValueError("品目番号が未入力のため、上書きできません。")
             for r in range(2, ws.max_row + 1):
                 cell_value = ws.cell(row=r, column=item_column).value
-                if _normalize_cell_text(cell_value) == item_value:
+                cell_text = _normalize_cell_text(cell_value)
+                if cell_text == normalized_item_value:
                     target_row = r
                     break
 
