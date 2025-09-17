@@ -21,7 +21,7 @@ import json
 import os
 import re
 import logging  # ログ出力を扱う標準ライブラリです
-from typing import Dict, Optional, Any, List, Callable
+from typing import Dict, Optional, Any, List, Callable, Tuple
 import threading
 import time  # 時間を測るためのモジュールです
 
@@ -833,7 +833,12 @@ class MainWindow(QMainWindow):
         # 検索を速くするための辞書を保存する入れ物です
         self.record_index: Dict[str, Dict[str, Dict[str, Dict[str, str]]]] = {}
         # 起動時に計算したシリンダー番号の候補を保存する入れ物です
+        # 初学者向け説明：シリンダー候補を再利用するための入れ物です。
         self._cylinder_candidates_cache: List[str] = []
+        # 初学者向け説明：保存待ちのデータと保存モードを順番に覚えておきます。
+        self.pending_saves: List[Tuple[Dict[str, str], str]] = []
+        # 初学者向け説明：保存処理が同時に二重で動かないように現在の状態を記録します。
+        self._is_flushing_pending: bool = False
         while self.current_xlsm is not None:
             spinner = LoadingSpinner(self)
             spinner.show()
@@ -1088,6 +1093,12 @@ class MainWindow(QMainWindow):
                 elif action == "close":
                     btn.clicked.connect(self.close)
                 continue
+
+        # 初学者向け説明：アプリ終了時にも保存処理が動くように、共通のシグナルへつなぎます。
+        app = QApplication.instance()
+        if app is not None:
+            # 初学者向け説明：アプリが閉じる直前に保留中の保存処理をまとめて実行します。
+            app.aboutToQuit.connect(self.flush_pending_saves)
 
     def on_item_no_changed(self, text: str) -> None:
         start_time = time.perf_counter()  # 処理開始時刻を記録します
@@ -1464,41 +1475,184 @@ class MainWindow(QMainWindow):
             _summarize_for_log(normalized_data),
         )
 
+        # 初学者向け説明：いまの入力内容と保存モードを保留リストに記録します。
+        stored_data = dict(data)
+        self.pending_saves.append((stored_data, save_mode))
+        LOGGER.info(
+            "on_save: 保留リストへ追加しました pending=%s",
+            len(self.pending_saves),
+        )
+
+        # 初学者向け説明：利用者に対して、保存が保留になったことを画面に表示します。
+        self.status.showMessage("Excel への保存を保留リストに追加しました。", 3000)
+        QMessageBox.information(
+            self,
+            "保存",
+            "Excel への書き込みはアプリ終了時にまとめて実行されます。",
+        )
+
+        # 初学者向け説明：保留にしても画面表示は最新状態に保つため、手元のデータも更新します。
+        sheet_data = self.preloaded_data.get(self.excel_sheet)
+        if sheet_data:
+            # 初学者向け説明：見出しを空白のない名前にそろえて、項目名と合わせます。
+            headers = [normalize_header_name(v) for v in sheet_data[0]]
+            row = [normalized_data.get(h, "") for h in headers]
+            item_key = normalized_data.get("品目番号", "")
+            if "品目番号" in headers:
+                idx = headers.index("品目番号")
+                for i in range(1, len(sheet_data)):
+                    cell = sheet_data[i][idx]
+                    cell_text = str(cell) if cell is not None else ""
+                    if cell_text == item_key:
+                        sheet_data[i] = row
+                        break
+                else:
+                    sheet_data.append(row)
+            # 初学者向け説明：辞書の内容も更新し、次の検索に備えます。
+            sheet_index = self.record_index.setdefault(self.excel_sheet, {}).setdefault("品目番号", {})
+            record_dict = {h: normalized_data.get(h, "") for h in headers if h}
+            if item_key:
+                sheet_index[item_key] = record_dict
+
+        # 初学者向け説明：保存ボタンの表記や有効状態を最新化します。
+        self.update_button_states()
+
+    @QtCore.Slot()
+    def flush_pending_saves(self) -> bool:
+        """
+        小学生にもわかる説明：
+          たまっている保存待ちデータを順番に Excel へ書き込みます。
+          失敗したものがあれば残しておき、どうするかを確認します。
+        """
+        # 初学者向け説明：すでに保存処理が動いているときは、新たな処理を重ねません。
+        if self._is_flushing_pending:
+            LOGGER.info("flush_pending_saves: 前回の保存処理が進行中のため、再実行を見送ります")
+            return True
+
+        # 初学者向け説明：保留データが無いときはすぐに終わり、呼び出し元へ知らせます。
+        if not self.pending_saves:
+            LOGGER.info("flush_pending_saves: 保留中のデータはありません")
+            return True
+
+        # 初学者向け説明：保存先のファイルが無ければ、何も書き込めないので警告します。
+        if self.current_xlsm is None:
+            QMessageBox.warning(
+                self,
+                "保存エラー",
+                "データファイルが設定されていないため、保留分を保存できません。",
+            )
+            LOGGER.warning("flush_pending_saves: current_xlsm が未設定のため保存できません")
+            return False
+
+        # 初学者向け説明：保存中フラグを立てて、途中で別の保存処理が走らないようにします。
+        self._is_flushing_pending = True
+        LOGGER.info(
+            "flush_pending_saves: 保留データの保存を開始します pending=%s",
+            len(self.pending_saves),
+        )
+
         try:
-            upsert_record_to_xlsm(self.current_xlsm, data, self.excel_sheet, save_mode)
-            self.status.showMessage("Excel に保存しました。", 3000)
-            QMessageBox.information(self, "保存", "保存が完了しました。")
+            # 初学者向け説明：保留リストの内容をコピーし、安全に順番へ処理します。
+            pending_copy = list(self.pending_saves)
+            remaining: List[Tuple[Dict[str, str], str]] = []
 
-            # 初学者向け説明：保存成功の事実をログへ残します。
-            LOGGER.info("on_save: Excel への保存が完了しました")
+            for idx, (pending_data, mode) in enumerate(pending_copy, start=1):
+                try:
+                    # 初学者向け説明：1件ずつ Excel へ書き込み、成功したら次へ進みます。
+                    upsert_record_to_xlsm(
+                        self.current_xlsm,
+                        pending_data,
+                        self.excel_sheet,
+                        mode,
+                    )
+                    LOGGER.info(
+                        "flush_pending_saves: %s 件目の保存が完了しました",
+                        idx,
+                    )
+                except Exception as e:
+                    # 初学者向け説明：失敗した場合は内容を残し、利用者に続行するか尋ねます。
+                    LOGGER.exception("flush_pending_saves: 保存に失敗しました index=%s", idx)
+                    message = (
+                        "Excel への保存中にエラーが発生しました。\n"
+                        f"{e}\n\n"
+                        "残りの保存処理を続行しますか？\n"
+                        "『はい』で続行、『いいえ』で中断します。"
+                    )
+                    choice = QMessageBox.question(
+                        self,
+                        "保存エラー",
+                        message,
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No,
+                    )
+                    remaining.append((pending_data, mode))
+                    if choice == QMessageBox.No:
+                        # 初学者向け説明：中断を選んだ場合は、残りのデータもそのまま残します。
+                        remaining.extend(pending_copy[idx:])
+                        break
+                    # 初学者向け説明：続行する場合は、失敗した分を残したまま次の処理へ進みます。
+                    continue
 
-            sheet_data = self.preloaded_data.get(self.excel_sheet)
-            if sheet_data:
-                # 初学者向け説明：見出しを空白のない名前にそろえて、項目名と合わせます。
-                headers = [normalize_header_name(v) for v in sheet_data[0]]
-                row = [normalized_data.get(h, "") for h in headers]
-                item_key = normalized_data.get("品目番号", "")
-                if "品目番号" in headers:
-                    idx = headers.index("品目番号")
-                    for i in range(1, len(sheet_data)):
-                        cell = sheet_data[i][idx]
-                        cell_text = str(cell) if cell is not None else ""
-                        if cell_text == item_key:
-                            sheet_data[i] = row
-                            break
-                    else:
-                        sheet_data.append(row)
-                # 辞書の内容も更新します
-                sheet_index = self.record_index.setdefault(self.excel_sheet, {}).setdefault("品目番号", {})
-                record_dict = {h: normalized_data.get(h, "") for h in headers if h}
-                if item_key:
-                    sheet_index[item_key] = record_dict
+            # 初学者向け説明：処理後の保留リストを更新し、残った件数を把握します。
+            self.pending_saves = remaining
 
-            self.update_button_states()
-        except Exception as e:
-            # 初学者向け説明：エラーの詳細をログへ記録し、利用者へも伝えます。
-            LOGGER.exception("on_save: 保存処理でエラーが発生しました")
-            QMessageBox.critical(self, "保存エラー", str(e))
+            if not self.pending_saves:
+                # 初学者向け説明：すべて保存できたことをステータスバーで知らせます。
+                self.status.showMessage("保留中のデータをすべて保存しました。", 3000)
+                LOGGER.info("flush_pending_saves: すべての保留データを保存しました")
+                return True
+
+            # 初学者向け説明：保存できなかったデータが残った場合は利用者へ知らせます。
+            QMessageBox.warning(
+                self,
+                "保存未完了",
+                "一部のデータが保存できなかったため、保留リストに残しました。",
+            )
+            LOGGER.warning(
+                "flush_pending_saves: %s 件のデータが未保存のまま残りました",
+                len(self.pending_saves),
+            )
+            return False
+        finally:
+            # 初学者向け説明：保存処理が終わったのでフラグを下ろし、次の呼び出しに備えます。
+            self._is_flushing_pending = False
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """
+        小学生にもわかる説明：
+          アプリを閉じる前に本当に終了するか確認し、必要なら保留保存を済ませます。
+        """
+        # 初学者向け説明：終了確認のメッセージに、保留中の件数があれば追記します。
+        message = "アプリケーションを終了しますか？"
+        if self.pending_saves:
+            message += f"\n保留中の保存データが {len(self.pending_saves)} 件あります。"
+
+        reply = QMessageBox.question(
+            self,
+            "終了確認",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            # 初学者向け説明：キャンセルされた場合は終了処理をやめ、画面をそのままにします。
+            event.ignore()
+            return
+
+        # 初学者向け説明：終了前に保留中の保存をまとめて実行し、結果で終了可否を決めます。
+        if not self.flush_pending_saves():
+            self.status.showMessage("保留データが残っているため終了を中止しました。", 5000)
+            QMessageBox.information(
+                self,
+                "終了中止",
+                "保留中の保存データが残っているため、アプリの終了を取りやめました。",
+            )
+            event.ignore()
+            return
+
+        # 初学者向け説明：保存が完了したので終了処理を続け、親クラスにも伝えます。
+        event.accept()
+        super().closeEvent(event)
 
     @QtCore.Slot()
     def on_clear(self, keep_item: bool = False):
