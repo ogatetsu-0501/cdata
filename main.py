@@ -24,7 +24,6 @@ import logging  # ログ出力を扱う標準ライブラリです
 from typing import Dict, Optional, Any, List, Callable
 import threading
 import time  # 時間を測るためのモジュールです
-import importlib  # 追加のモジュールを読み込むための道具です
 
 # 半角数字を全角数字に直すためのテーブルを用意します
 _FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
@@ -421,326 +420,15 @@ class CylinderUnit(QWidget):
 
 
 # === Excel の読み書き関数（省略なし・そのまま） ===
-def _close_excel_workbook_if_open(path: str) -> None:
-    """指定された Excel ファイルが開いていれば保存して閉じます"""
-    # 初学者向け説明：最初にログへ記録し、どのファイルを対象にするか残します。
-    LOGGER.info("_close_excel_workbook_if_open: 対象パス=%s", path)
-
-    # 初学者向け説明：Windows だけが Excel を自動操作できるので対象 OS かどうか確認します。
-    if not _IS_WINDOWS:
-        # 初学者向け説明：Windows 以外では処理できないことを知らせます。
-        LOGGER.info("_close_excel_workbook_if_open: Windows 以外のため処理を終了します")
-        return
-
-    # 初学者向け説明：win32com.client が準備できない場合は自動操作を諦めます。
-    spec = importlib.util.find_spec("win32com.client")
-    if spec is None:
-        # 初学者向け説明：ライブラリが無いので終了したことを残します。
-        LOGGER.info("_close_excel_workbook_if_open: win32com が見つからないため処理を終了します")
-        return
-
-    # 初学者向け説明：実際に win32com.client を読み込み、動作中の Excel を探します。
-    win32_client = importlib.import_module("win32com.client")
-    try:
-        excel = win32_client.GetActiveObject("Excel.Application")
-    except Exception:
-        return
-
-    # 初学者向け説明：比較を簡単にするため、パスを正規化します。
-    target = os.path.normcase(os.path.normpath(os.path.abspath(path)))
-
-    try:
-        workbooks = excel.Workbooks
-        count = workbooks.Count
-    except Exception:
-        return
-
-    # 初学者向け説明：開いているブックを後ろから調べ、目的のファイルがあれば保存して閉じます。
-    for idx in range(count, 0, -1):
-        try:
-            workbook = workbooks.Item(idx)
-        except Exception:
-            continue
-
-        try:
-            current = os.path.normcase(os.path.normpath(str(workbook.FullName)))
-        except Exception:
-            continue
-
-        if current != target:
-            continue
-
-        try:
-            workbook.Save()
-            # 初学者向け説明：保存を指示したことをログに書きます。
-            LOGGER.info("_close_excel_workbook_if_open: Excel へ保存命令を発行しました")
-        except Exception:
-            pass
-
-        try:
-            workbook.Close(SaveChanges=False)
-            # 初学者向け説明：保存せずに閉じる命令を出したことを残します。
-            LOGGER.info("_close_excel_workbook_if_open: Excel ブックを閉じました")
-        except Exception:
-            try:
-                workbook.Close()
-            except Exception:
-                pass
-        break
-
-    # 初学者向け説明：最後に処理が終わったことを知らせます。
-    LOGGER.info("_close_excel_workbook_if_open: 処理を完了しました")
-
-
-def _try_upsert_with_excel(path: str, normalized_data: Dict[str, str], sheet_name: str,
-                           save_mode: str) -> Optional[int]:
-    """可能なら Excel 本体を使って安全に保存します。"""
-    # 初学者向け説明：処理の開始をログへ残し、条件確認の準備をします。
-    LOGGER.info(
-        "_try_upsert_with_excel: 開始 path=%s sheet=%s mode=%s", path, sheet_name, save_mode
-    )
-
-    # 初学者向け説明：Windows 以外では Excel を直接操作できないので処理を打ち切ります。
-    if not _IS_WINDOWS:
-        LOGGER.info("_try_upsert_with_excel: Windows 以外のため処理を終了します")
-        return None
-
-    # 初学者向け説明：win32com.client を見つけられなければ Excel の自動操作はできません。
-    spec = importlib.util.find_spec("win32com.client")
-    if spec is None:
-        LOGGER.info("_try_upsert_with_excel: win32com が見つからないため処理を終了します")
-        return None
-
-    # 初学者向け説明：実際に win32com.client を読み込み、Excel を起動（または接続）します。
-    win32_client = importlib.import_module("win32com.client")
-    excel = None
-    workbook = None
-    # 初学者向け説明：後で元に戻すため、「上書き確認の警告設定」の今の値を控える場所を用意します。
-    previous_alert_before_overwriting = None
-    alert_before_overwriting_supported = False
-    try:
-        try:
-            excel = win32_client.DispatchEx("Excel.Application")
-            LOGGER.info("_try_upsert_with_excel: Excel.Application を DispatchEx で取得しました")
-        except Exception:
-            try:
-                excel = win32_client.Dispatch("Excel.Application")
-                LOGGER.info("_try_upsert_with_excel: 既存の Excel.Application へ接続しました")
-            except Exception:
-                LOGGER.info("_try_upsert_with_excel: Excel を取得できず処理を終了します")
-                return None
-
-        # 初学者向け説明：画面に表示せず、警告も出さないように設定します。
-        excel.Visible = False
-        excel.DisplayAlerts = False
-        try:
-            # 初学者向け説明：上書き前に出る確認の設定を記録し、上書き警告が出ないように一時的に無効化します。
-            previous_alert_before_overwriting = excel.AlertBeforeOverwriting
-            excel.AlertBeforeOverwriting = False
-            alert_before_overwriting_supported = True
-        except Exception:
-            # 初学者向け説明：古い Excel などで設定できない場合は、無理に触らずそのまま進めます。
-            alert_before_overwriting_supported = False
-
-        try:
-            # 初学者にもわかる説明：Excel が「読み取り専用で開きますか？」と聞いてこないように、
-            #   あらかじめ編集できる設定でブックを開くよう命令します。
-            workbook = excel.Workbooks.Open(
-                path,
-                ReadOnly=False,
-                IgnoreReadOnlyRecommended=True,
-            )
-            LOGGER.info("_try_upsert_with_excel: ブックを編集モードで開きました")
-        except Exception:
-            LOGGER.info("_try_upsert_with_excel: ブックを開けず処理を終了します")
-            return None
-
-        try:
-            worksheet = workbook.Worksheets(sheet_name)
-            LOGGER.info("_try_upsert_with_excel: 対象シートを取得しました")
-        except Exception as exc:
-            raise ValueError(f"シート『{sheet_name}』がありません") from exc
-
-        # 初学者向け説明：見出し行（1行目）を調べ、列名から列番号の辞書を作ります。
-        header_map: Dict[str, int] = {}
-        xl_to_left = -4159  # Excel 定数：左方向へ移動（xlToLeft）
-        try:
-            last_header_col = int(worksheet.Cells(1, worksheet.Columns.Count)
-                                  .End(xl_to_left).Column)
-        except Exception:
-            last_header_col = 0
-        if last_header_col < 0:
-            last_header_col = 0
-        for col in range(1, last_header_col + 1):
-            header_value = worksheet.Cells(1, col).Value
-            if header_value is None:
-                continue
-            # 初学者向け説明：列名を文字に直し、余計な空白を取り除いて扱いやすくします。
-            header_text = normalize_header_name(header_value)
-            if not header_text or header_text in header_map:
-                continue
-            header_map[header_text] = col
-
-        LOGGER.info(
-            "_try_upsert_with_excel: 見出しを確認しました headers=%s",
-            list(header_map.keys()),
-        )
-
-        # 初学者向け説明：必要な列が無ければ保存できないのでエラーにします。
-        if "品目番号" not in header_map:
-            raise ValueError("『品目番号』の列が見つかりません")
-
-        item_column = header_map["品目番号"]
-        xl_up = -4162  # Excel 定数：上方向へ移動（xlUp）
-        try:
-            last_filled_row = int(worksheet.Cells(worksheet.Rows.Count, item_column)
-                                  .End(xl_up).Row)
-        except Exception:
-            last_filled_row = 1
-        if last_filled_row < 1:
-            last_filled_row = 1
-
-        LOGGER.info(
-            "_try_upsert_with_excel: 品目番号の最終行を確認しました last_row=%d",
-            last_filled_row,
-        )
-
-        # 初学者向け説明：上書き保存の場合は既存行を探し、新規の場合は最後尾に追加します。
-        target_row: Optional[int] = None
-        item_value = normalized_data.get("品目番号", "")
-        if save_mode == "上書き保存":
-            for row in range(2, last_filled_row + 1):
-                cell_value = worksheet.Cells(row, item_column).Value
-                if str(cell_value or "").strip() == item_value:
-                    target_row = row
-                    break
-            if target_row is None:
-                LOGGER.info("_try_upsert_with_excel: 上書き対象が見つからずエラーにします")
-                raise ValueError("上書き対象の行が見つかりません。先に該当データを読み込んでください。")
-            LOGGER.info(
-                "_try_upsert_with_excel: 上書き対象行を特定しました row=%s item=%s",
-                target_row,
-                item_value,
-            )
-        else:
-            target_row = last_filled_row + 1
-            LOGGER.info(
-                "_try_upsert_with_excel: 新規登録の書き込み行を決定しました row=%s",
-                target_row,
-            )
-
-        # 初学者向け説明：列名ごとに対応する値を取り出して書き込みます。
-        for header_key, column in header_map.items():
-            if header_key not in normalized_data:
-                continue
-            value = normalized_data.get(header_key)
-            worksheet.Cells(target_row, column).Value = "" if value is None else str(value)
-
-        LOGGER.info("_try_upsert_with_excel: Excel シートへ書き込みました row=%s", target_row)
-
-        # 初学者向け説明：ここまでの変更を Excel に保存します。
-        workbook.Save()
-        LOGGER.info("_try_upsert_with_excel: Excel ブックを保存しました")
-        return target_row
-
-    except ValueError:
-        # 初学者向け説明：入力不足など明確なエラーはそのまま呼び出し元へ伝えます。
-        raise
-    except Exception:
-        # 初学者向け説明：想定外のエラーは Excel 保存に失敗したとして、後段の処理へ委ねます。
-        LOGGER.exception("_try_upsert_with_excel: 想定外のエラーが発生しました")
-        return None
-    finally:
-        # 初学者向け説明：Excel を起動したままにしないよう、必ず後片付けします。
-        if workbook is not None:
-            try:
-                workbook.Close(SaveChanges=False)
-            except Exception:
-                pass
-        if excel is not None:
-            try:
-                if alert_before_overwriting_supported:
-                    try:
-                        # 初学者向け説明：作業前に覚えておいた上書き警告の設定を元通りに戻します。
-                        excel.AlertBeforeOverwriting = previous_alert_before_overwriting
-                    except Exception:
-                        pass
-                excel.Quit()
-                LOGGER.info("_try_upsert_with_excel: Excel アプリケーションを終了しました")
-            except Exception:
-                pass
-
-
-def _verify_saved_row(path: str, sheet_name: str, target_row: int,
-                      normalized_data: Dict[str, str]) -> bool:
-    """
-    小学生にもわかる説明：
-      Excel に書き込んだ内容が本当に反映されたかを読み直して確認します。
-    """
-    # 初学者向け説明：念のため失敗を前提にしておき、途中で問題があれば False を返します。
-    wb = None
-    try:
-        # 初学者向け説明：openpyxl で Excel ファイルを開きます。
-        wb = load_workbook(path, keep_vba=True, data_only=False)
-    except Exception:
-        LOGGER.exception("_verify_saved_row: ブックを開けませんでした")
-        return False
-
-    try:
-        if sheet_name not in wb.sheetnames:
-            LOGGER.error("_verify_saved_row: シート %s が見つかりません", sheet_name)
-            return False
-
-        ws = wb[sheet_name]
-
-        # 初学者向け説明：列の対応表を作り、存在しない列は確認対象から外します。
-        header_map = _build_header_map_from_sheet(ws)
-        if not header_map:
-            LOGGER.error("_verify_saved_row: 見出しを取得できませんでした")
-            return False
-
-        if target_row < 1 or target_row > ws.max_row:
-            LOGGER.warning(
-                "_verify_saved_row: 指定行が範囲外のため確認できません row=%s max=%s",
-                target_row,
-                ws.max_row,
-            )
-            return False
-
-        for header_key, expected_value in normalized_data.items():
-            column = header_map.get(header_key)
-            if column is None:
-                continue
-
-            expected_text = _normalize_cell_text(expected_value)
-            actual_cell = ws.cell(row=target_row, column=column).value
-            actual_text = _normalize_cell_text(actual_cell)
-
-            if actual_text != expected_text:
-                LOGGER.warning(
-                    "_verify_saved_row: 値が一致しません column=%s expected=%s actual=%s row=%s",
-                    header_key,
-                    expected_text,
-                    actual_text,
-                    target_row,
-                )
-                return False
-
-        # 初学者向け説明：すべて一致したので True を返します。
-        return True
-    finally:
-        if wb is not None:
-            wb.close()
-
-
 def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name: str,
-                          save_mode: str, target_row_hint: Optional[int] = None) -> int:
+                          save_mode: str) -> int:
     """
     小学生にもわかる説明：
-      openpyxl を使って Excel ファイルへ書き込みます。
+      openpyxl だけを使って Excel ファイルへ書き込みます。
     """
     try:
-        # 初学者向け説明：Excel を誰かが開いていても読めるよう、例外を補足して案内します。
+        # 初学者向け説明：誰かが同じファイルを開いていると保存できないので、
+        #   その場合は丁寧なメッセージ付きで知らせます。
         wb = load_workbook(path, keep_vba=True, data_only=False)
     except PermissionError as e:
         LOGGER.exception("_upsert_with_openpyxl: ファイルを開けませんでした")
@@ -749,74 +437,55 @@ def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name
         ) from e
 
     try:
+        # 初学者向け説明：指定されたシートが無ければ処理を止めて状況を伝えます。
         if sheet_name not in wb.sheetnames:
             raise ValueError(f"シート『{sheet_name}』がありません")
 
+        # 初学者向け説明：シートの内容を取得し、列名から列番号を調べます。
         ws = wb[sheet_name]
-
         header_map = _build_header_map_from_sheet(ws)
         if "品目番号" not in header_map:
             raise ValueError("『品目番号』の列が見つかりません")
 
+        # 初学者向け説明：品目番号の列を覚えておき、どの行へ書くかを判断します。
         item_column = header_map["品目番号"]
         target_row: Optional[int] = None
 
         if save_mode == "上書き保存":
+            # 初学者向け説明：品目番号が一致する最初の行を上から順に探します。
             item_value = normalized_data.get("品目番号", "")
-
-            # 初学者向け説明：Excel COM が教えてくれた行番号があれば先に照合します。
-            if target_row_hint is not None and target_row_hint >= 2:
-                cell_value = ws.cell(row=target_row_hint, column=item_column).value
+            for r in range(2, ws.max_row + 1):
+                cell_value = ws.cell(row=r, column=item_column).value
                 if _normalize_cell_text(cell_value) == item_value:
-                    target_row = target_row_hint
-                    LOGGER.info(
-                        "_upsert_with_openpyxl: COM が返した行番号を再利用します row=%s",
-                        target_row,
-                    )
-                else:
-                    LOGGER.info(
-                        "_upsert_with_openpyxl: COM の行番号と値が一致しません row=%s",
-                        target_row_hint,
-                    )
-
-            # 初学者向け説明：ヒントが使えない場合は上から順番に探します。
-            if target_row is None:
-                for r in range(2, ws.max_row + 1):
-                    cell_value = ws.cell(row=r, column=item_column).value
-                    if _normalize_cell_text(cell_value) == item_value:
-                        target_row = r
-                        break
+                    target_row = r
+                    break
 
             if target_row is None:
                 LOGGER.info("upsert_record_to_xlsm: 上書き対象が見つからずエラーを投げます")
-                raise ValueError("上書き対象の行が見つかりません。先に該当データを読み込んでください。")
+                raise ValueError(
+                    "上書き対象の行が見つかりません。先に該当データを読み込んでください。"
+                )
 
             LOGGER.info("upsert_record_to_xlsm: 上書き対象行 row=%s", target_row)
         else:
-            # 初学者向け説明：新規登録時はヒントがあればその行に、無ければ末尾に追加します。
-            if target_row_hint is not None and target_row_hint >= 2:
-                target_row = target_row_hint
-                LOGGER.info(
-                    "_upsert_with_openpyxl: COM が案内した新規行を使用します row=%s",
-                    target_row,
-                )
-            else:
-                last_filled_row = 1
-                for r in range(ws.max_row, 1, -1):
-                    value = ws.cell(row=r, column=item_column).value
-                    if value not in (None, ""):
-                        last_filled_row = r
-                        break
-                target_row = last_filled_row + 1
-                LOGGER.info("upsert_record_to_xlsm: 新規登録の書き込み行 row=%s", target_row)
+            # 初学者向け説明：新規追加では末尾付近から値を探し、最後のデータ行の次を決めます。
+            last_filled_row = 1
+            for r in range(ws.max_row, 1, -1):
+                value = ws.cell(row=r, column=item_column).value
+                if value not in (None, ""):
+                    last_filled_row = r
+                    break
+            target_row = last_filled_row + 1
+            LOGGER.info("upsert_record_to_xlsm: 新規登録の書き込み行 row=%s", target_row)
 
-        # 初学者向け説明：対象となる列だけを順番に上書きします。
+        # 初学者向け説明：対象となる列を一つずつ上書きし、文字列として保存します。
         for header_key, column in header_map.items():
             if header_key not in normalized_data:
                 continue
             value = normalized_data.get(header_key)
             ws.cell(row=target_row, column=column).value = "" if value is None else str(value)
 
+        # 初学者向け説明：すべて書き換えたら保存し、行番号を返します。
         wb.save(path)
         return target_row
     finally:
@@ -849,7 +518,7 @@ def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[
 
 
 def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save_mode: str) -> None:
-    # 初学者向け説明：保存作業の前に Excel が開いていれば自動で閉じて安全にします。
+    # 初学者向け説明：処理の開始をログに残し、どのファイルへ保存するか記録します。
     LOGGER.info(
         "upsert_record_to_xlsm: 処理開始 path=%s sheet=%s mode=%s",
         path,
@@ -857,59 +526,26 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
         save_mode,
     )
 
-    # 初学者向け説明：列名を揃えておき、あとで Excel と確実に突き合わせられるようにします。
+    # 初学者向け説明：フォームの項目名を整えておき、列名と確実に一致させます。
     normalized_data = normalize_form_keys(data)
     LOGGER.info(
         "upsert_record_to_xlsm: 入力データを正規化しました data=%s",
         _summarize_for_log(normalized_data),
     )
 
-    _close_excel_workbook_if_open(path)
-
-    # 初学者向け説明：まずは Excel 本体で保存を試し、書き込んだ行番号を受け取ります。
-    target_row = _try_upsert_with_excel(path, normalized_data, sheet_name, save_mode)
-
-    # 初学者向け説明：Excel で書き込んだ内容が実際に反映されたかを覚える変数です。
-    excel_verified = False
-
-    if target_row is not None:
-        # 初学者向け説明：openpyxl で読み直し、本当に同じ値が入ったか確認します。
-        if _verify_saved_row(path, sheet_name, target_row, normalized_data):
-            LOGGER.info(
-                "upsert_record_to_xlsm: Excel COM の書き込み結果を確認できました row=%s",
-                target_row,
-            )
-            excel_verified = True
-        else:
-            # 初学者向け説明：確認できなければログへ残し、このあと再保存します。
-            LOGGER.warning(
-                "upsert_record_to_xlsm: Excel COM の保存内容を確認できなかったため再保存します"
-            )
-
-    # 初学者向け説明：最終的には openpyxl で必ず同じ内容を書き込み、確実に保存します。
-    LOGGER.info("upsert_record_to_xlsm: openpyxl による最終保存を実行します")
-
-    # 初学者向け説明：Excel から得た行番号があればヒントにして、同じ位置へ書き戻します。
+    # 初学者向け説明：openpyxl で直接書き込みを行い、その結果の行番号を受け取ります。
     final_row = _upsert_with_openpyxl(
         path,
         normalized_data,
         sheet_name,
         save_mode,
-        target_row_hint=target_row,
     )
 
-    if excel_verified:
-        # 初学者向け説明：Excel で書いた内容を openpyxl でも同じ行へ反映できたことを記録します。
-        LOGGER.info(
-            "upsert_record_to_xlsm: Excel COM の内容を openpyxl で確定しました row=%s",
-            final_row,
-        )
-    else:
-        # 初学者向け説明：Excel が使えなかった場合も含め、openpyxl で保存できたことを伝えます。
-        LOGGER.info(
-            "upsert_record_to_xlsm: openpyxl で保存を完了しました row=%s",
-            final_row,
-        )
+    # 初学者向け説明：保存が終わった行番号を記録し、処理の完了を知らせます。
+    LOGGER.info(
+        "upsert_record_to_xlsm: openpyxl で保存を完了しました row=%s",
+        final_row,
+    )
 
 
 # === 起動時データ抽出関数（省略なし・そのまま） ===
