@@ -32,6 +32,38 @@ _FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
 SEARCH_COLUMNS = ["品目番号"]
 
 
+def normalize_header_name(value: Any) -> str:
+    """
+    小学生にもわかる説明：
+      Excel の見出し文字から前後の余計な空白を取り除き、
+      同じ名前どうしを比べやすく整えます。
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    return text.strip()
+
+
+def normalize_form_keys(data: Dict[str, str]) -> Dict[str, str]:
+    """
+    小学生にもわかる説明：
+      フォームの項目名を Excel と同じように整えて、
+      同じ列へ正しく書き込めるようにします。
+    """
+    # 初学者向け説明：正規化した結果を入れておく空の辞書を用意します。
+    normalized: Dict[str, str] = {}
+    # 初学者向け説明：フォームの項目名と値を順番に取り出して整えます。
+    for key, value in data.items():
+        # 初学者向け説明：余計な空白を取り除いて列名をそろえます。
+        normalized_key = normalize_header_name(key)
+        if not normalized_key:
+            continue
+        # 初学者向け説明：同じ列名が重複しても最初の値だけを残します。
+        if normalized_key not in normalized:
+            normalized[normalized_key] = value
+    return normalized
+
+
 def to_full_width(num: int) -> str:
     """
     小学生にもわかる説明：
@@ -418,8 +450,13 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
             last_header_col = 0
         for col in range(1, last_header_col + 1):
             header_value = worksheet.Cells(1, col).Value
-            if header_value is not None:
-                header_map[str(header_value)] = col
+            if header_value is None:
+                continue
+            # 初学者向け説明：列名を文字に直し、余計な空白を取り除いて扱いやすくします。
+            header_text = normalize_header_name(header_value)
+            if not header_text or header_text in header_map:
+                continue
+            header_map[header_text] = col
 
         # 初学者向け説明：必要な列が無ければ保存できないのでエラーにします。
         if "品目番号" not in header_map:
@@ -435,9 +472,12 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
         if last_filled_row < 1:
             last_filled_row = 1
 
+        # 初学者向け説明：フォームの項目名を Excel と同じ形に整えます。
+        normalized_data = normalize_form_keys(data)
+
         # 初学者向け説明：上書き保存の場合は既存行を探し、新規の場合は最後尾に追加します。
         target_row: Optional[int] = None
-        item_value = data.get("品目番号", "")
+        item_value = normalized_data.get("品目番号", "")
         if save_mode == "上書き保存":
             for row in range(2, last_filled_row + 1):
                 cell_value = worksheet.Cells(row, item_column).Value
@@ -449,11 +489,11 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
         else:
             target_row = last_filled_row + 1
 
-        # 初学者向け説明：辞書の値を文字列に直しながら各セルへ書き込みます。
-        for key, value in data.items():
-            column = header_map.get(key)
-            if column is None:
+        # 初学者向け説明：列名ごとに対応する値を取り出して書き込みます。
+        for header_key, column in header_map.items():
+            if header_key not in normalized_data:
                 continue
+            value = normalized_data.get(header_key)
             worksheet.Cells(target_row, column).Value = "" if value is None else str(value)
 
         # 初学者向け説明：ここまでの変更を Excel に保存します。
@@ -495,8 +535,13 @@ def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[
     header_map: Dict[str, int] = {}
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=1, column=c).value
-        if v is not None:
-            header_map[str(v)] = c
+        if v is None:
+            continue
+        # 初学者向け説明：セルの文字から余計な空白を取り除き、名前が同じ列を探しやすくします。
+        header_text = normalize_header_name(v)
+        if not header_text or header_text in header_map:
+            continue
+        header_map[header_text] = c
 
     if "品目番号" not in header_map:
         raise ValueError("『品目番号』の列が見つかりません")
@@ -537,16 +582,24 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
     header_map: Dict[str, int] = {}
     for c in range(1, ws.max_column + 1):
         v = ws.cell(row=1, column=c).value
-        if v is not None:
-            header_map[str(v)] = c
+        if v is None:
+            continue
+        # 初学者向け説明：見出しの文字から余計な空白を取り除き、列の名前をそろえます。
+        header_text = normalize_header_name(v)
+        if not header_text or header_text in header_map:
+            continue
+        header_map[header_text] = c
 
     if "品目番号" not in header_map:
         raise ValueError("『品目番号』の列が見つかりません")
 
+    # 初学者向け説明：フォームの列名を Excel と同じ形に整えます。
+    normalized_data = normalize_form_keys(data)
+
     col_item = header_map["品目番号"]
     target_row = None
     for r in range(2, ws.max_row + 1):
-        if str(ws.cell(row=r, column=col_item).value or "") == data.get("品目番号", ""):
+        if str(ws.cell(row=r, column=col_item).value or "") == normalized_data.get("品目番号", ""):
             target_row = r
             break
 
@@ -565,11 +618,12 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
                 break
         target_row = last_filled_row + 1
 
-    for k, v in data.items():
-        c = header_map.get(k)
-        if c is None:
+    for header_key, column in header_map.items():
+        if header_key not in normalized_data:
             continue
-        ws.cell(row=target_row, column=c).value = v
+        value = normalized_data.get(header_key)
+        # 初学者向け説明：Excel には空欄は空文字、その他は文字列として書き込みます。
+        ws.cell(row=target_row, column=column).value = "" if value is None else str(value)
 
     wb.save(path)
 
@@ -597,8 +651,13 @@ def _extract_range_from_sheet(ws) -> List[List[Any]]:
     header_map: Dict[str, int] = {}
     for c in range(1, max_col + 1):
         v = ws.cell(row=1, column=c).value
-        if v is not None:
-            header_map[str(v)] = c
+        if v is None:
+            continue
+        # 初学者向け説明：見出しの文字から余計な空白を取り除いて、列名をそろえています。
+        header_text = normalize_header_name(v)
+        if not header_text or header_text in header_map:
+            continue
+        header_map[header_text] = c
 
     last_row = 1
     for key in ("品目番号", "品目番号+刷順"):
@@ -638,8 +697,8 @@ def build_record_index(data: List[List[Any]], columns: List[str]) -> Dict[str, D
     if not data:
         return index
 
-    # 1行目は見出しなので文字に直しておきます
-    headers = [str(v) if v is not None else "" for v in data[0]]
+    # 1行目は見出しなので、空白を取り除いた名前にそろえておきます
+    headers = [normalize_header_name(v) for v in data[0]]
 
     for column in columns:
         # 欲しい列が無い場合は飛ばします
@@ -1334,7 +1393,10 @@ class MainWindow(QMainWindow):
     @QtCore.Slot()
     def on_save(self):
         data = self.collect_form_data()
-        if not data.get("品目番号"):
+        # 初学者向け説明：保存前に項目名を Excel と同じ形に整えます。
+        normalized_data = normalize_form_keys(data)
+
+        if not normalized_data.get("品目番号"):
             QMessageBox.warning(self, "入力エラー", "品目番号は必須です。")
             return
         if self.current_xlsm is None:
@@ -1357,9 +1419,10 @@ class MainWindow(QMainWindow):
 
             sheet_data = self.preloaded_data.get(self.excel_sheet)
             if sheet_data:
-                headers = [str(v) if v is not None else "" for v in sheet_data[0]]
-                row = [data.get(h, "") for h in headers]
-                item_key = data.get("品目番号", "")
+                # 初学者向け説明：見出しを空白のない名前にそろえて、項目名と合わせます。
+                headers = [normalize_header_name(v) for v in sheet_data[0]]
+                row = [normalized_data.get(h, "") for h in headers]
+                item_key = normalized_data.get("品目番号", "")
                 if "品目番号" in headers:
                     idx = headers.index("品目番号")
                     for i in range(1, len(sheet_data)):
@@ -1372,7 +1435,7 @@ class MainWindow(QMainWindow):
                         sheet_data.append(row)
                 # 辞書の内容も更新します
                 sheet_index = self.record_index.setdefault(self.excel_sheet, {}).setdefault("品目番号", {})
-                record_dict = {h: data.get(h, "") for h in headers if h}
+                record_dict = {h: normalized_data.get(h, "") for h in headers if h}
                 if item_key:
                     sheet_index[item_key] = record_dict
 
