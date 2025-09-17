@@ -20,6 +20,7 @@ import sys
 import json
 import os
 import re
+import logging  # ログ出力を扱う標準ライブラリです
 from typing import Dict, Optional, Any, List, Callable
 import threading
 import time  # 時間を測るためのモジュールです
@@ -28,8 +29,65 @@ import importlib  # 追加のモジュールを読み込むための道具です
 # 半角数字を全角数字に直すためのテーブルを用意します
 _FW_TABLE = str.maketrans("0123456789", "０１２３４５６７８９")
 
+# ログファイルを置く場所と名前を決めます
+_LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+_LOG_FILE = os.path.join(_LOG_DIR, "application.log")
+
+
+def _setup_logger() -> logging.Logger:
+    """
+    小学生にもわかる説明：
+      ログを書き込む道具を準備して、画面とファイルの両方へ記録します。
+    """
+    # 初学者向け説明：最初に保存フォルダーが無ければ作ります。
+    os.makedirs(_LOG_DIR, exist_ok=True)
+
+    # 初学者向け説明：同じ設定を繰り返さないよう、すでに作成済みか確認します。
+    logger = logging.getLogger("cdata")
+    if logger.handlers:
+        return logger
+
+    # 初学者向け説明：INFO 以上の重要度を持つログを扱うように設定します。
+    logger.setLevel(logging.INFO)
+
+    # 初学者向け説明：ログの表示方法を統一するフォーマッターを用意します。
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
+
+    # 初学者向け説明：ログをファイルに書き出すハンドラーです。
+    file_handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # 初学者向け説明：同じ内容を画面にも表示するハンドラーを追加します。
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    return logger
+
+
+# 初学者向け説明：アプリ全体で使う共通のロガーを作成します。
+LOGGER = _setup_logger()
+
 # 検索に利用する列名です。必要に応じて増やしてください。
 SEARCH_COLUMNS = ["品目番号"]
+
+
+def _summarize_for_log(data: Dict[str, str], max_length: int = 60) -> Dict[str, str]:
+    """
+    小学生にもわかる説明：
+      長い文字は見やすい長さに切りそろえて、ログに残しやすくします。
+    """
+    # 初学者向け説明：新しい辞書を用意して、各値の長さを調整して入れ直します。
+    summarized: Dict[str, str] = {}
+    for key, value in data.items():
+        text = "" if value is None else str(value)
+        if len(text) > max_length:
+            text = text[:max_length - 3] + "..."
+        summarized[key] = text
+    return summarized
 
 
 def normalize_header_name(value: Any) -> str:
@@ -327,13 +385,20 @@ class CylinderUnit(QWidget):
 # === Excel の読み書き関数（省略なし・そのまま） ===
 def _close_excel_workbook_if_open(path: str) -> None:
     """指定された Excel ファイルが開いていれば保存して閉じます"""
+    # 初学者向け説明：最初にログへ記録し、どのファイルを対象にするか残します。
+    LOGGER.info("_close_excel_workbook_if_open: 対象パス=%s", path)
+
     # 初学者向け説明：Windows だけが Excel を自動操作できるので対象 OS かどうか確認します。
     if not _IS_WINDOWS:
+        # 初学者向け説明：Windows 以外では処理できないことを知らせます。
+        LOGGER.info("_close_excel_workbook_if_open: Windows 以外のため処理を終了します")
         return
 
     # 初学者向け説明：win32com.client が準備できない場合は自動操作を諦めます。
     spec = importlib.util.find_spec("win32com.client")
     if spec is None:
+        # 初学者向け説明：ライブラリが無いので終了したことを残します。
+        LOGGER.info("_close_excel_workbook_if_open: win32com が見つからないため処理を終了します")
         return
 
     # 初学者向け説明：実際に win32com.client を読み込み、動作中の Excel を探します。
@@ -369,11 +434,15 @@ def _close_excel_workbook_if_open(path: str) -> None:
 
         try:
             workbook.Save()
+            # 初学者向け説明：保存を指示したことをログに書きます。
+            LOGGER.info("_close_excel_workbook_if_open: Excel へ保存命令を発行しました")
         except Exception:
             pass
 
         try:
             workbook.Close(SaveChanges=False)
+            # 初学者向け説明：保存せずに閉じる命令を出したことを残します。
+            LOGGER.info("_close_excel_workbook_if_open: Excel ブックを閉じました")
         except Exception:
             try:
                 workbook.Close()
@@ -381,17 +450,27 @@ def _close_excel_workbook_if_open(path: str) -> None:
                 pass
         break
 
+    # 初学者向け説明：最後に処理が終わったことを知らせます。
+    LOGGER.info("_close_excel_workbook_if_open: 処理を完了しました")
+
 
 def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
                            save_mode: str) -> bool:
     """可能なら Excel 本体を使って安全に保存します。"""
+    # 初学者向け説明：処理の開始をログへ残し、条件確認の準備をします。
+    LOGGER.info(
+        "_try_upsert_with_excel: 開始 path=%s sheet=%s mode=%s", path, sheet_name, save_mode
+    )
+
     # 初学者向け説明：Windows 以外では Excel を直接操作できないので処理を打ち切ります。
     if not _IS_WINDOWS:
+        LOGGER.info("_try_upsert_with_excel: Windows 以外のため処理を終了します")
         return False
 
     # 初学者向け説明：win32com.client を見つけられなければ Excel の自動操作はできません。
     spec = importlib.util.find_spec("win32com.client")
     if spec is None:
+        LOGGER.info("_try_upsert_with_excel: win32com が見つからないため処理を終了します")
         return False
 
     # 初学者向け説明：実際に win32com.client を読み込み、Excel を起動（または接続）します。
@@ -404,10 +483,13 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
     try:
         try:
             excel = win32_client.DispatchEx("Excel.Application")
+            LOGGER.info("_try_upsert_with_excel: Excel.Application を DispatchEx で取得しました")
         except Exception:
             try:
                 excel = win32_client.Dispatch("Excel.Application")
+                LOGGER.info("_try_upsert_with_excel: 既存の Excel.Application へ接続しました")
             except Exception:
+                LOGGER.info("_try_upsert_with_excel: Excel を取得できず処理を終了します")
                 return False
 
         # 初学者向け説明：画面に表示せず、警告も出さないように設定します。
@@ -430,11 +512,14 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
                 ReadOnly=False,
                 IgnoreReadOnlyRecommended=True,
             )
+            LOGGER.info("_try_upsert_with_excel: ブックを編集モードで開きました")
         except Exception:
+            LOGGER.info("_try_upsert_with_excel: ブックを開けず処理を終了します")
             return False
 
         try:
             worksheet = workbook.Worksheets(sheet_name)
+            LOGGER.info("_try_upsert_with_excel: 対象シートを取得しました")
         except Exception as exc:
             raise ValueError(f"シート『{sheet_name}』がありません") from exc
 
@@ -458,6 +543,11 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
                 continue
             header_map[header_text] = col
 
+        LOGGER.info(
+            "_try_upsert_with_excel: 見出しを確認しました headers=%s",
+            list(header_map.keys()),
+        )
+
         # 初学者向け説明：必要な列が無ければ保存できないのでエラーにします。
         if "品目番号" not in header_map:
             raise ValueError("『品目番号』の列が見つかりません")
@@ -472,8 +562,17 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
         if last_filled_row < 1:
             last_filled_row = 1
 
+        LOGGER.info(
+            "_try_upsert_with_excel: 品目番号の最終行を確認しました last_row=%d",
+            last_filled_row,
+        )
+
         # 初学者向け説明：フォームの項目名を Excel と同じ形に整えます。
         normalized_data = normalize_form_keys(data)
+        LOGGER.info(
+            "_try_upsert_with_excel: 入力データを正規化しました data=%s",
+            _summarize_for_log(normalized_data),
+        )
 
         # 初学者向け説明：上書き保存の場合は既存行を探し、新規の場合は最後尾に追加します。
         target_row: Optional[int] = None
@@ -485,9 +584,19 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
                     target_row = row
                     break
             if target_row is None:
+                LOGGER.info("_try_upsert_with_excel: 上書き対象が見つからずエラーにします")
                 raise ValueError("上書き対象の行が見つかりません。先に該当データを読み込んでください。")
+            LOGGER.info(
+                "_try_upsert_with_excel: 上書き対象行を特定しました row=%s item=%s",
+                target_row,
+                item_value,
+            )
         else:
             target_row = last_filled_row + 1
+            LOGGER.info(
+                "_try_upsert_with_excel: 新規登録の書き込み行を決定しました row=%s",
+                target_row,
+            )
 
         # 初学者向け説明：列名ごとに対応する値を取り出して書き込みます。
         for header_key, column in header_map.items():
@@ -496,8 +605,11 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
             value = normalized_data.get(header_key)
             worksheet.Cells(target_row, column).Value = "" if value is None else str(value)
 
+        LOGGER.info("_try_upsert_with_excel: Excel シートへ書き込みました row=%s", target_row)
+
         # 初学者向け説明：ここまでの変更を Excel に保存します。
         workbook.Save()
+        LOGGER.info("_try_upsert_with_excel: Excel ブックを保存しました")
         return True
 
     except ValueError:
@@ -505,6 +617,7 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
         raise
     except Exception:
         # 初学者向け説明：想定外のエラーは Excel 保存に失敗したとして、後段の処理へ委ねます。
+        LOGGER.exception("_try_upsert_with_excel: 想定外のエラーが発生しました")
         return False
     finally:
         # 初学者向け説明：Excel を起動したままにしないよう、必ず後片付けします。
@@ -522,6 +635,7 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
                     except Exception:
                         pass
                 excel.Quit()
+                LOGGER.info("_try_upsert_with_excel: Excel アプリケーションを終了しました")
             except Exception:
                 pass
 
@@ -561,16 +675,26 @@ def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[
 
 def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save_mode: str) -> None:
     # 初学者向け説明：保存作業の前に Excel が開いていれば自動で閉じて安全にします。
+    LOGGER.info(
+        "upsert_record_to_xlsm: 処理開始 path=%s sheet=%s mode=%s",
+        path,
+        sheet_name,
+        save_mode,
+    )
     _close_excel_workbook_if_open(path)
 
     # 初学者向け説明：Windows + Excel が使えるなら Excel 本体に保存を任せます。
     if _try_upsert_with_excel(path, data, sheet_name, save_mode):
+        LOGGER.info("upsert_record_to_xlsm: Excel COM 保存が成功しました")
         return
+
+    LOGGER.info("upsert_record_to_xlsm: openpyxl による保存へ切り替えます")
 
     try:
         wb = load_workbook(path, keep_vba=True, data_only=False)
     except PermissionError as e:
         # 初学者向け説明：どうしてもファイルを開けなかった場合は、手動で閉じてもらうよう案内します。
+        LOGGER.exception("upsert_record_to_xlsm: ファイルを開けませんでした")
         raise PermissionError(
             "Excel が開いている可能性があります。Excel を手動で閉じてから再度お試しください。"
         ) from e
@@ -595,6 +719,10 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
 
     # 初学者向け説明：フォームの列名を Excel と同じ形に整えます。
     normalized_data = normalize_form_keys(data)
+    LOGGER.info(
+        "upsert_record_to_xlsm: 入力データを正規化しました data=%s",
+        _summarize_for_log(normalized_data),
+    )
 
     col_item = header_map["品目番号"]
     target_row = None
@@ -607,7 +735,9 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
     if save_mode == "上書き保存":
         # 初学者向け説明：上書き保存なのに対象が無ければ、操作を止めて利用者へ知らせます。
         if target_row is None:
+            LOGGER.info("upsert_record_to_xlsm: 上書き対象が見つからずエラーを投げます")
             raise ValueError("上書き対象の行が見つかりません。先に該当データを読み込んでください。")
+        LOGGER.info("upsert_record_to_xlsm: 上書き対象行 row=%s", target_row)
     else:
         # 初学者向け説明：新規登録では品目番号列の最後に続けて書き込む行を探します。
         last_filled_row = 1
@@ -617,6 +747,7 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
                 last_filled_row = r
                 break
         target_row = last_filled_row + 1
+        LOGGER.info("upsert_record_to_xlsm: 新規登録の書き込み行 row=%s", target_row)
 
     for header_key, column in header_map.items():
         if header_key not in normalized_data:
@@ -626,6 +757,7 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
         ws.cell(row=target_row, column=column).value = "" if value is None else str(value)
 
     wb.save(path)
+    LOGGER.info("upsert_record_to_xlsm: openpyxl で保存を完了しました row=%s", target_row)
 
 
 # === 起動時データ抽出関数（省略なし・そのまま） ===
@@ -1265,6 +1397,12 @@ class MainWindow(QMainWindow):
 
         # 初学者向け説明：シリンダー番号も専用の列へ入れられるように集めます。
         d.update(self._collect_cylinder_form_data())
+
+        # 初学者向け説明：収集した内容をログに残し、後で保存時の状況を追えるようにします。
+        LOGGER.info(
+            "collect_form_data: 入力値を集計しました data=%s",
+            _summarize_for_log(d),
+        )
         return d
 
     def _collect_cylinder_form_data(self) -> Dict[str, str]:
@@ -1287,6 +1425,11 @@ class MainWindow(QMainWindow):
                     value = line.text().strip()
                 cylinder_data[f"{to_full_width(order)}色目シリンダー"] = value
 
+        # 初学者向け説明：列ごとの値をログへ記録し、どの番号にどんな値を入れたか確認できるようにします。
+        LOGGER.info(
+            "_collect_cylinder_form_data: シリンダー入力 data=%s",
+            _summarize_for_log(cylinder_data),
+        )
         return cylinder_data
 
     def fill_form(self, data: Dict[str, str]) -> None:
@@ -1412,10 +1555,21 @@ class MainWindow(QMainWindow):
         if self.save_button is not None:
             save_mode = self.save_button.text().strip() or save_mode
 
+        # 初学者向け説明：保存対象のパスやモード、入力値をログへ記録します。
+        LOGGER.info(
+            "on_save: 保存処理を開始します path=%s mode=%s data=%s",
+            self.current_xlsm,
+            save_mode,
+            _summarize_for_log(normalized_data),
+        )
+
         try:
             upsert_record_to_xlsm(self.current_xlsm, data, self.excel_sheet, save_mode)
             self.status.showMessage("Excel に保存しました。", 3000)
             QMessageBox.information(self, "保存", "保存が完了しました。")
+
+            # 初学者向け説明：保存成功の事実をログへ残します。
+            LOGGER.info("on_save: Excel への保存が完了しました")
 
             sheet_data = self.preloaded_data.get(self.excel_sheet)
             if sheet_data:
@@ -1441,6 +1595,8 @@ class MainWindow(QMainWindow):
 
             self.update_button_states()
         except Exception as e:
+            # 初学者向け説明：エラーの詳細をログへ記録し、利用者へも伝えます。
+            LOGGER.exception("on_save: 保存処理でエラーが発生しました")
             QMessageBox.critical(self, "保存エラー", str(e))
 
     @QtCore.Slot()
