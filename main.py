@@ -866,24 +866,31 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
 
     _close_excel_workbook_if_open(path)
 
-    # 初学者向け説明：まずは Excel 本体での保存を試み、成功した行番号を受け取ります。
+    # 初学者向け説明：まずは Excel 本体で保存を試し、書き込んだ行番号を受け取ります。
     target_row = _try_upsert_with_excel(path, normalized_data, sheet_name, save_mode)
+
+    # 初学者向け説明：Excel で書き込んだ内容が実際に反映されたかを覚える変数です。
+    excel_verified = False
+
     if target_row is not None:
-        # 初学者向け説明：念のため openpyxl で実データを読み直し、書き込み結果を確認します。
+        # 初学者向け説明：openpyxl で読み直し、本当に同じ値が入ったか確認します。
         if _verify_saved_row(path, sheet_name, target_row, normalized_data):
             LOGGER.info(
-                "upsert_record_to_xlsm: Excel COM 保存が成功しました row=%s",
+                "upsert_record_to_xlsm: Excel COM の書き込み結果を確認できました row=%s",
                 target_row,
             )
-            return
-        LOGGER.warning(
-            "upsert_record_to_xlsm: Excel COM の保存内容を確認できなかったため再保存します"
-        )
+            excel_verified = True
+        else:
+            # 初学者向け説明：確認できなければログへ残し、このあと再保存します。
+            LOGGER.warning(
+                "upsert_record_to_xlsm: Excel COM の保存内容を確認できなかったため再保存します"
+            )
 
-    LOGGER.info("upsert_record_to_xlsm: openpyxl による保存へ切り替えます")
+    # 初学者向け説明：最終的には openpyxl で必ず同じ内容を書き込み、確実に保存します。
+    LOGGER.info("upsert_record_to_xlsm: openpyxl による最終保存を実行します")
 
-    # 初学者向け説明：Excel COM で使用した行番号をヒントとして再利用しつつ保存します。
-    target_row = _upsert_with_openpyxl(
+    # 初学者向け説明：Excel から得た行番号があればヒントにして、同じ位置へ書き戻します。
+    final_row = _upsert_with_openpyxl(
         path,
         normalized_data,
         sheet_name,
@@ -891,7 +898,18 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
         target_row_hint=target_row,
     )
 
-    LOGGER.info("upsert_record_to_xlsm: openpyxl で保存を完了しました row=%s", target_row)
+    if excel_verified:
+        # 初学者向け説明：Excel で書いた内容を openpyxl でも同じ行へ反映できたことを記録します。
+        LOGGER.info(
+            "upsert_record_to_xlsm: Excel COM の内容を openpyxl で確定しました row=%s",
+            final_row,
+        )
+    else:
+        # 初学者向け説明：Excel が使えなかった場合も含め、openpyxl で保存できたことを伝えます。
+        LOGGER.info(
+            "upsert_record_to_xlsm: openpyxl で保存を完了しました row=%s",
+            final_row,
+        )
 
 
 # === 起動時データ抽出関数（省略なし・そのまま） ===
