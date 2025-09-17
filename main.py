@@ -76,6 +76,77 @@ LOGGER = _setup_logger()
 SEARCH_COLUMNS = ["品目番号"]
 
 
+def _close_excel_workbook_if_open(path: str) -> bool:
+    """
+    小学生にもわかる説明：
+      Excel で開かれている同じファイルを見つけたら、自動で保存して閉じます。
+    """
+    # 初学者向け説明：Windows 以外では Excel の自動操作ができないので、早めに処理を抜けます。
+    if os.name != "nt":
+        return False
+
+    try:
+        # 初学者向け説明：Excel を操作するための専用ライブラリを読み込みます。
+        import pythoncom  # type: ignore
+        import win32com.client  # type: ignore
+    except ImportError:
+        # 初学者向け説明：ライブラリが無い環境では自動操作ができないので諦めます。
+        LOGGER.info("_close_excel_workbook_if_open: pywin32 が無いため自動操作をスキップします")
+        return False
+
+    # 初学者向け説明：比較のために、絶対パスと大文字小文字を揃えた形を覚えておきます。
+    normalized_target = os.path.normcase(os.path.abspath(path))
+
+    # 初学者向け説明：COM を利用する際の初期化状況を覚えて、最後に後片付けできるようにします。
+    com_initialized = False
+    excel = None
+
+    try:
+        # 初学者向け説明：Excel へ命令を出す前に、COM の初期化を行います。
+        pythoncom.CoInitialize()
+        com_initialized = True
+
+        # 初学者向け説明：既に開いている Excel を取得し、そこから目的のブックを探します。
+        excel = win32com.client.GetActiveObject("Excel.Application")
+    except Exception:
+        # 初学者向け説明：Excel が起動していない、または取得に失敗した場合はここで諦めます。
+        if com_initialized:
+            pythoncom.CoUninitialize()
+        return False
+
+    closed = False
+    try:
+        # 初学者向け説明：開かれている全てのブックを調べ、対象のパスと一致したら閉じます。
+        for workbook in list(excel.Workbooks):
+            try:
+                workbook_path = os.path.normcase(os.path.abspath(workbook.FullName))
+            except Exception:
+                # 初学者向け説明：ファイル名が読めない場合は、そのブックは無視します。
+                continue
+            if workbook_path == normalized_target:
+                # 初学者向け説明：未保存の変更があれば保存した上で閉じます。
+                workbook.Close(SaveChanges=True)
+                LOGGER.info(
+                    "_close_excel_workbook_if_open: Excel で開かれていたブックを自動保存して閉じました"
+                )
+                closed = True
+                break
+    except Exception:
+        # 初学者向け説明：Excel 操作で予期しないエラーが出た場合はログに残して諦めます。
+        LOGGER.exception("_close_excel_workbook_if_open: Excel の操作に失敗しました")
+        closed = False
+    finally:
+        # 初学者向け説明：Excel の参照を解放し、COM の初期化も後片付けします。
+        try:
+            if excel is not None:
+                del excel
+        finally:
+            if com_initialized:
+                pythoncom.CoUninitialize()
+
+    return closed
+
+
 def _summarize_for_log(data: Dict[str, str], max_length: int = 60) -> Dict[str, str]:
     """
     小学生にもわかる説明：
@@ -440,17 +511,27 @@ def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name
     小学生にもわかる説明：
       openpyxl だけを使って Excel ファイルへ書き込みます。
     """
-    try:
-        # 初学者向け説明：誰かが同じファイルを開いていると保存できないので、
-        #   その場合は丁寧なメッセージ付きで知らせます。
-        wb = load_workbook(path, keep_vba=True, data_only=False)
-    except PermissionError as e:
-        LOGGER.exception("_upsert_with_openpyxl: ファイルを開けませんでした")
-        raise PermissionError(
-            "Excel が開いている可能性があります。Excel を手動で閉じてから再度お試しください。"
-        ) from e
+    wb = None
+    # 初学者向け説明：開く段階で他の人が使用中かもしれないので、自動的に閉じて再試行します。
+    for attempt in range(2):
+        try:
+            # 初学者向け説明：Excel ファイルを開いて、VBA を壊さないように読み込みます。
+            wb = load_workbook(path, keep_vba=True, data_only=False)
+            break
+        except PermissionError as e:
+            LOGGER.exception("_upsert_with_openpyxl: ファイルを開く際に拒否されました (attempt=%s)", attempt + 1)
+            if attempt == 0 and _close_excel_workbook_if_open(path):
+                # 初学者向け説明：自動で Excel を閉じられたので、少し待ってから再挑戦します。
+                time.sleep(0.5)
+                continue
+            raise PermissionError(
+                "Excel で開かれているブックを自動で保存して閉じようとしましたが失敗しました。Excel を閉じてから再度お試しください。"
+            ) from e
 
     try:
+        if wb is None:
+            raise PermissionError("Excel ブックの読み込みに失敗しました。")
+
         # 初学者向け説明：指定されたシートが無ければ処理を止めて状況を伝えます。
         if sheet_name not in wb.sheetnames:
             raise ValueError(f"シート『{sheet_name}』がありません")
@@ -504,11 +585,24 @@ def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name
             value = normalized_data.get(header_key)
             ws.cell(row=target_row, column=column).value = "" if value is None else str(value)
 
-        # 初学者向け説明：すべて書き換えたら保存し、行番号を返します。
-        wb.save(path)
+        # 初学者向け説明：保存時も誰かが開いている可能性があるため、自動で閉じてから再試行します。
+        for attempt in range(2):
+            try:
+                wb.save(path)
+                break
+            except PermissionError as e:
+                LOGGER.exception("_upsert_with_openpyxl: 保存時に書き込めませんでした (attempt=%s)", attempt + 1)
+                if attempt == 0 and _close_excel_workbook_if_open(path):
+                    # 初学者向け説明：自動で閉じられたので、少し待ってから再び保存を試みます。
+                    time.sleep(0.5)
+                    continue
+                raise PermissionError(
+                    "Excel で開かれているブックを自動で保存して閉じようとしましたが失敗しました。Excel を閉じてから再度お試しください。"
+                ) from e
         return target_row
     finally:
-        wb.close()
+        if wb is not None:
+            wb.close()
 
 
 def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[Dict[str, str]]:
