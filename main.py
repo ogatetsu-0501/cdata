@@ -366,6 +366,9 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
     win32_client = importlib.import_module("win32com.client")
     excel = None
     workbook = None
+    # 初学者向け説明：後で元に戻すため、「上書き確認の警告設定」の今の値を控える場所を用意します。
+    previous_alert_before_overwriting = None
+    alert_before_overwriting_supported = False
     try:
         try:
             excel = win32_client.DispatchEx("Excel.Application")
@@ -378,6 +381,14 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
         # 初学者向け説明：画面に表示せず、警告も出さないように設定します。
         excel.Visible = False
         excel.DisplayAlerts = False
+        try:
+            # 初学者向け説明：上書き前に出る確認の設定を記録し、上書き警告が出ないように一時的に無効化します。
+            previous_alert_before_overwriting = excel.AlertBeforeOverwriting
+            excel.AlertBeforeOverwriting = False
+            alert_before_overwriting_supported = True
+        except Exception:
+            # 初学者向け説明：古い Excel などで設定できない場合は、無理に触らずそのまま進めます。
+            alert_before_overwriting_supported = False
 
         try:
             # 初学者にもわかる説明：Excel が「読み取り専用で開きますか？」と聞いてこないように、
@@ -464,6 +475,12 @@ def _try_upsert_with_excel(path: str, data: Dict[str, str], sheet_name: str,
                 pass
         if excel is not None:
             try:
+                if alert_before_overwriting_supported:
+                    try:
+                        # 初学者向け説明：作業前に覚えておいた上書き警告の設定を元通りに戻します。
+                        excel.AlertBeforeOverwriting = previous_alert_before_overwriting
+                    except Exception:
+                        pass
                 excel.Quit()
             except Exception:
                 pass
