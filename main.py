@@ -21,7 +21,7 @@ import json
 import os
 import re
 import logging  # ログ出力を扱う標準ライブラリです
-from typing import Dict, Optional, Any, List, Callable
+from typing import Dict, Optional, Any, List, Callable, Tuple
 import threading
 import time  # 時間を測るためのモジュールです
 
@@ -145,6 +145,87 @@ def _close_excel_workbook_if_open(path: str) -> bool:
                 pythoncom.CoUninitialize()
 
     return closed
+
+
+def _reopen_excel_workbook(path: str) -> bool:
+    """
+    小学生にもわかる説明：
+      自動で閉じた Excel ブックをもう一度開き直します。
+    """
+    # 初学者向け説明：Windows 専用の仕組みなので、他の OS では何もしません。
+    if os.name != "nt":
+        return False
+
+    try:
+        # 初学者向け説明：Excel を操作するための必要なライブラリを読み込みます。
+        import pythoncom  # type: ignore
+        import win32com.client  # type: ignore
+    except ImportError:
+        # 初学者向け説明：ライブラリが無い場合は自動で開き直せないため諦めます。
+        LOGGER.info("_reopen_excel_workbook: pywin32 が無いため自動で開き直す処理をスキップします")
+        return False
+
+    # 初学者向け説明：COM を使うための初期化状況と Excel への参照を管理します。
+    com_initialized = False
+    excel = None
+    try:
+        # 初学者向け説明：Excel へ命令を出す準備として COM を初期化します。
+        pythoncom.CoInitialize()
+        com_initialized = True
+
+        try:
+            # 初学者向け説明：すでに起動している Excel を取得し、そこから開きます。
+            excel = win32com.client.GetActiveObject("Excel.Application")
+        except Exception:
+            # 初学者向け説明：Excel が見つからなければ新しく起動して、そのアプリを使います。
+            excel = win32com.client.Dispatch("Excel.Application")
+            excel.Visible = True
+
+        # 初学者向け説明：絶対パスに直したうえでブックを開き直します。
+        excel.Workbooks.Open(os.path.abspath(path))
+        LOGGER.info("_reopen_excel_workbook: Excel ブックを開き直しました")
+        return True
+    except Exception:
+        # 初学者向け説明：予期しないエラーが出た場合はログに残し、開き直し失敗として扱います。
+        LOGGER.exception("_reopen_excel_workbook: Excel ブックの開き直しに失敗しました")
+        return False
+    finally:
+        # 初学者向け説明：参照を解放し、COM の後片付けも忘れずに行います。
+        try:
+            if excel is not None:
+                del excel
+        finally:
+            if com_initialized:
+                pythoncom.CoUninitialize()
+
+
+def _load_workbook_with_retry(path: str) -> Tuple[Any, bool]:
+    """
+    小学生にもわかる説明：
+      Excel ファイルを開くときにロックされていても、自動で閉じてから再挑戦します。
+    """
+    # 初学者向け説明：最終的に開いたブックと、途中で自動的に閉じたかどうかを返す準備をします。
+    closed_by_helper = False
+
+    for attempt in range(2):
+        try:
+            # 初学者向け説明：VBA を壊さない設定でブックを読み込みます。
+            workbook = load_workbook(path, keep_vba=True, data_only=False)
+            return workbook, closed_by_helper
+        except PermissionError as e:
+            # 初学者向け説明：誰かが開いていて読み込めなかった場合の対処を行います。
+            LOGGER.exception("_load_workbook_with_retry: 読み込み時にアクセスが拒否されました (attempt=%s)", attempt + 1)
+            if attempt == 0 and _close_excel_workbook_if_open(path):
+                # 初学者向け説明：自動で閉じられたので再挑戦の前に少し待機します。
+                closed_by_helper = True
+                time.sleep(0.5)
+                continue
+            raise PermissionError(
+                "Excel で開かれているブックを自動で保存して閉じようとしましたが失敗しました。Excel を閉じてから再度お試しください。"
+            ) from e
+
+    # 初学者向け説明：ここに来るのは異常系なので、明示的にエラーを出します。
+    raise PermissionError("Excel ブックの読み込みに失敗しました。")
 
 
 def _summarize_for_log(data: Dict[str, str], max_length: int = 60) -> Dict[str, str]:
@@ -511,26 +592,14 @@ def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name
     小学生にもわかる説明：
       openpyxl だけを使って Excel ファイルへ書き込みます。
     """
-    wb = None
-    # 初学者向け説明：開く段階で他の人が使用中かもしれないので、自動的に閉じて再試行します。
-    for attempt in range(2):
-        try:
-            # 初学者向け説明：Excel ファイルを開いて、VBA を壊さないように読み込みます。
-            wb = load_workbook(path, keep_vba=True, data_only=False)
-            break
-        except PermissionError as e:
-            LOGGER.exception("_upsert_with_openpyxl: ファイルを開く際に拒否されました (attempt=%s)", attempt + 1)
-            if attempt == 0 and _close_excel_workbook_if_open(path):
-                # 初学者向け説明：自動で Excel を閉じられたので、少し待ってから再挑戦します。
-                time.sleep(0.5)
-                continue
-            raise PermissionError(
-                "Excel で開かれているブックを自動で保存して閉じようとしましたが失敗しました。Excel を閉じてから再度お試しください。"
-            ) from e
+    # 初学者向け説明：後で必ず閉じるために、ブックと再オープンが必要かの印を用意します。
+    wb: Optional[Any] = None
+    needs_reopen = False
 
     try:
-        if wb is None:
-            raise PermissionError("Excel ブックの読み込みに失敗しました。")
+        # 初学者向け説明：自作のヘルパーでブックを開き、途中で閉じたかも覚えておきます。
+        wb, closed_during_load = _load_workbook_with_retry(path)
+        needs_reopen = closed_during_load
 
         # 初学者向け説明：指定されたシートが無ければ処理を止めて状況を伝えます。
         if sheet_name not in wb.sheetnames:
@@ -594,6 +663,7 @@ def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name
                 LOGGER.exception("_upsert_with_openpyxl: 保存時に書き込めませんでした (attempt=%s)", attempt + 1)
                 if attempt == 0 and _close_excel_workbook_if_open(path):
                     # 初学者向け説明：自動で閉じられたので、少し待ってから再び保存を試みます。
+                    needs_reopen = True
                     time.sleep(0.5)
                     continue
                 raise PermissionError(
@@ -601,33 +671,57 @@ def _upsert_with_openpyxl(path: str, normalized_data: Dict[str, str], sheet_name
                 ) from e
         return target_row
     finally:
+        # 初学者向け説明：openpyxl のブックは必ず閉じて、ファイルのロックを解きます。
         if wb is not None:
             wb.close()
+        # 初学者向け説明：途中で Excel を閉じていた場合は、後片付けとして開き直します。
+        if needs_reopen:
+            _reopen_excel_workbook(path)
 
 
 def read_record_from_xlsm(path: str, item_no: str, sheet_name: str) -> Optional[Dict[str, str]]:
-    wb = load_workbook(path, keep_vba=True, data_only=False)
-    if sheet_name not in wb.sheetnames:
-        raise ValueError(f"シート『{sheet_name}』がありません")
-    ws = wb[sheet_name]
+    # 初学者向け説明：ブックと開き直しの必要性を覚えておきながら処理します。
+    wb: Optional[Any] = None
+    needs_reopen = False
+    result: Optional[Dict[str, str]] = None
 
-    # 初学者向け説明：共通の関数を使って列名と列番号の対応表を作ります。
-    header_map = _build_header_map_from_sheet(ws)
+    try:
+        # 初学者向け説明：読み込み時にロックされていても自動で閉じられるヘルパーを使います。
+        wb, closed_during_load = _load_workbook_with_retry(path)
+        needs_reopen = closed_during_load
 
-    if "品目番号" not in header_map:
-        raise ValueError("『品目番号』の列が見つかりません")
+        if sheet_name not in wb.sheetnames:
+            raise ValueError(f"シート『{sheet_name}』がありません")
+        ws = wb[sheet_name]
 
-    col_item = header_map["品目番号"]
-    target_row = None
-    for r in range(2, ws.max_row + 1):
-        if str(ws.cell(row=r, column=col_item).value or "") == item_no:
-            target_row = r
-            break
-    if target_row is None:
-        return None
+        # 初学者向け説明：共通の関数を使って列名と列番号の対応表を作ります。
+        header_map = _build_header_map_from_sheet(ws)
 
-    return {name: str(ws.cell(row=target_row, column=header_map.get(name)).value or "")
-            for name in header_map.keys()}
+        if "品目番号" not in header_map:
+            raise ValueError("『品目番号』の列が見つかりません")
+
+        col_item = header_map["品目番号"]
+        target_row = None
+        for r in range(2, ws.max_row + 1):
+            if str(ws.cell(row=r, column=col_item).value or "") == item_no:
+                target_row = r
+                break
+        if target_row is None:
+            result = None
+        else:
+            result = {
+                name: str(ws.cell(row=target_row, column=header_map.get(name)).value or "")
+                for name in header_map.keys()
+            }
+    finally:
+        # 初学者向け説明：読み終わったらブックを閉じてファイルのロックを解除します。
+        if wb is not None:
+            wb.close()
+        # 初学者向け説明：途中で Excel を自動的に閉じていた場合は、元に戻すため開き直します。
+        if needs_reopen:
+            _reopen_excel_workbook(path)
+
+    return result
 
 
 def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save_mode: str) -> None:
@@ -663,16 +757,32 @@ def upsert_record_to_xlsm(path: str, data: Dict[str, str], sheet_name: str, save
 
 # === 起動時データ抽出関数（省略なし・そのまま） ===
 def extract_initial_data(path: str, progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, List[List[Any]]]:
-    wb = load_workbook(path, keep_vba=True, data_only=False)
+    # 初学者向け説明：ブックの開閉と再オープンの必要性を管理しながらデータを集めます。
+    wb: Optional[Any] = None
+    needs_reopen = False
     result: Dict[str, List[List[Any]]] = {}
-    sheets = ("受注データ", "シリンダーデータ")
-    total = len(sheets)
-    for idx, sheet in enumerate(sheets, start=1):
-        if sheet in wb.sheetnames:
-            ws = wb[sheet]
-            result[sheet] = _extract_range_from_sheet(ws)
-        if progress is not None:
-            progress(idx, total)
+
+    try:
+        # 初学者向け説明：起動時の読み込みでもロック解除を自動化するヘルパーを利用します。
+        wb, closed_during_load = _load_workbook_with_retry(path)
+        needs_reopen = closed_during_load
+
+        sheets = ("受注データ", "シリンダーデータ")
+        total = len(sheets)
+        for idx, sheet in enumerate(sheets, start=1):
+            if sheet in wb.sheetnames:
+                ws = wb[sheet]
+                result[sheet] = _extract_range_from_sheet(ws)
+            if progress is not None:
+                progress(idx, total)
+    finally:
+        # 初学者向け説明：読み込みが終わったらブックを閉じてファイルを解放します。
+        if wb is not None:
+            wb.close()
+        # 初学者向け説明：途中で Excel を閉じた場合は、元の状態に戻せるよう開き直します。
+        if needs_reopen:
+            _reopen_excel_workbook(path)
+
     return result
 
 
