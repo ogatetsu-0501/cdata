@@ -73,7 +73,11 @@ def _setup_logger() -> logging.Logger:
 LOGGER = _setup_logger()
 
 # 検索に利用する列名です。必要に応じて増やしてください。
+# 初学者にもわかる説明：Excel の検索に利用する列名の一覧です。
 SEARCH_COLUMNS = ["品目番号"]
+
+# 初学者にもわかる説明：シリンダー入力欄の列幅をそろえるための寸法をあらかじめ定義します。
+CYLINDER_COLUMN_WIDTHS: Tuple[int, int, int, int] = (96, 200, 200, 140)
 
 
 def _close_excel_workbook_if_open(path: str) -> bool:
@@ -439,15 +443,44 @@ class CylinderUnit(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(0)
 
-        row = QHBoxLayout()
+        # 初学者にもわかる説明：1 行分の入力欄をカード風にまとめ、背景と枠を整えます。
+        row_frame = QFrame()
+        row_frame.setObjectName("cylinderRow")
+        row_frame.setStyleSheet("""
+            QFrame#cylinderRow {
+                background: #FFFFFF;
+                border-radius: 10px;
+                border: 1px solid rgba(41,98,255,0.12);
+            }
+            QFrame#cylinderRow:hover {
+                border: 1px solid rgba(41,98,255,0.30);
+            }
+            QFrame#cylinderRow QComboBox,
+            QFrame#cylinderRow QLineEdit {
+                padding: 8px 10px;
+                border-radius: 8px;
+                border: 1px solid rgba(0,0,0,0.12);
+                background: #FFFFFF;
+            }
+            QFrame#cylinderRow QComboBox:focus,
+            QFrame#cylinderRow QLineEdit:focus {
+                border: 1.4px solid #2962FF;
+            }
+        """)
+
+        # 初学者にもわかる説明：横一列に並べるためのレイアウトを用意し、余白と間隔をそろえます。
+        row = QHBoxLayout(row_frame)
+        row.setContentsMargins(12, 12, 12, 12)
+        row.setSpacing(16)
 
         # 〇色目
         self.order_combo = QComboBox()
         self.order_combo.addItems(["0", "1"])
         self.order_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.order_combo.setFixedWidth(CYLINDER_COLUMN_WIDTHS[0])
         row.addWidget(self.order_combo)
 
         # シリンダー番号（編集可）
@@ -455,6 +488,7 @@ class CylinderUnit(QWidget):
         self.cylinder_combo.setEditable(True)
         self.cylinder_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.cylinder_combo.setMinimumWidth(CYLINDER_COLUMN_WIDTHS[1])
         # 9桁の数字のみ入力できるようにします
         regex = QtCore.QRegularExpression(r"\d{9}")
         validator = QRegularExpressionValidator(regex)
@@ -468,6 +502,7 @@ class CylinderUnit(QWidget):
 
         # 色名
         self.color_edit = QLineEdit()
+        self.color_edit.setMinimumWidth(CYLINDER_COLUMN_WIDTHS[2])
         row.addWidget(self.color_edit)
 
         # ベタ巾（数値）
@@ -477,13 +512,17 @@ class CylinderUnit(QWidget):
         dv.setLocale(QtCore.QLocale("C"))
         self.width_edit.setValidator(dv)
         self.width_edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
+        self.width_edit.setMinimumWidth(CYLINDER_COLUMN_WIDTHS[3])
         row.addWidget(self.width_edit)
+
+        # 初学者にもわかる説明：空きスペースを追加し、入力欄を左側に寄せて整列させます。
+        row.addStretch(1)
 
         # 左寄せ＆はみ出し防止を適用
         setup_left_aligned_combo(self.order_combo)
         setup_left_aligned_combo(self.cylinder_combo)
 
-        layout.addLayout(row)
+        layout.addWidget(row_frame)
 
     def refresh_cylinder_list(self) -> None:
         """
@@ -803,11 +842,16 @@ class Card(QFrame):
         super().__init__(parent)
         self.setObjectName("card")
         self.setFrameShape(QFrame.Shape.NoFrame)
+        # 初学者にもわかる説明：カード全体の共通デザインと、派生バリエーションの色合いをまとめて設定します。
         self.setStyleSheet("""
             QFrame#card {
                 background: #FFFFFF;
                 border-radius: 12px;
                 border: 1px solid rgba(0,0,0,0.08);
+            }
+            QFrame#card[variant="section"] {
+                background: #F8FAFF;
+                border: 1px solid rgba(41,98,255,0.18);
             }
         """)
 
@@ -938,24 +982,57 @@ class MainWindow(QMainWindow):
             color_widget.textChanged.connect(self.on_color_count_changed)
 
         self.cyl_title = QLabel("シリンダーデータ登録")
-        self.cyl_title.setStyleSheet("font-weight:600;")
+        self.cyl_title.setStyleSheet("font-weight:600; font-size:18px; color:#1A237E;")
+        self.cyl_title.setContentsMargins(4, 8, 4, 0)
 
-        self.cylinder_layout = QVBoxLayout()
-        self.cylinder_layout.setSpacing(8)
+        # 初学者にもわかる説明：シリンダー入力欄全体をカード状にまとめ、他の入力欄との統一感を出します。
+        self.cylinder_card = Card()
+        self.cylinder_card.setProperty("variant", "section")
+        # 初学者にもわかる説明：プロパティを変えた直後にスタイルを更新して、色がすぐ反映されるようにします。
+        self.cylinder_card.style().unpolish(self.cylinder_card)
+        self.cylinder_card.style().polish(self.cylinder_card)
+        self.cylinder_layout = QVBoxLayout(self.cylinder_card)
+        self.cylinder_layout.setContentsMargins(20, 16, 20, 20)
+        self.cylinder_layout.setSpacing(16)
 
-        # 入力欄の見出しを横一列に並べるためのレイアウトを準備します
-        self.cylinder_header = QHBoxLayout()
+        # 初学者にもわかる説明：見出しを載せるためのフレームを用意し、背景色と角丸で区切りを付けます。
+        header_frame = QFrame()
+        header_frame.setObjectName("cylinderHeader")
+        header_frame.setStyleSheet("""
+            QFrame#cylinderHeader {
+                background: rgba(41,98,255,0.10);
+                border-radius: 8px;
+            }
+            QFrame#cylinderHeader QLabel {
+                font-weight: 600;
+                color: #1A237E;
+            }
+        """)
+        self.cylinder_header = QHBoxLayout(header_frame)
+        self.cylinder_header.setContentsMargins(12, 10, 12, 10)
+        self.cylinder_header.setSpacing(16)
         header_labels = ["〇色目", "シリンダー番号", "色名", "ベタ巾"]
-        for text in header_labels:
+        for text, width in zip(header_labels, CYLINDER_COLUMN_WIDTHS):
+            # 初学者にもわかる説明：各列の幅をそろえ、文字を左そろえにします。
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-weight:600;")
+            lbl.setMinimumWidth(width)
+            lbl.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
             self.cylinder_header.addWidget(lbl)
-        self.cylinder_layout.addLayout(self.cylinder_header)
+        self.cylinder_header.addStretch(1)
+        self.cylinder_layout.addWidget(header_frame)
 
-        # 入力欄を作成中であることを知らせるラベルを用意し、普段は隠しておきます
+        # 初学者にもわかる説明：処理状況を知らせるラベルを用意し、控えめな色で配置します。
         self.cylinder_status_label = QLabel("")
+        self.cylinder_status_label.setStyleSheet("color:#2962FF; font-size:12px;")
+        self.cylinder_status_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
         self.cylinder_status_label.hide()
         self.cylinder_layout.addWidget(self.cylinder_status_label)
+
+        # 初学者にもわかる説明：シリンダー入力行を積み重ねるための専用レイアウトを用意します。
+        self.cylinder_units_layout = QVBoxLayout()
+        self.cylinder_units_layout.setContentsMargins(0, 0, 0, 0)
+        self.cylinder_units_layout.setSpacing(12)
+        self.cylinder_layout.addLayout(self.cylinder_units_layout)
 
         self.cylinder_units: List[CylinderUnit] = []
         # 先頭の色番号コンボがどれかを覚えて、不要な二重接続を避けます
@@ -963,7 +1040,7 @@ class MainWindow(QMainWindow):
 
         wrap.addLayout(self.grid)
         wrap.addWidget(self.cyl_title)
-        wrap.addLayout(self.cylinder_layout)
+        wrap.addWidget(self.cylinder_card)
         root.addWidget(self.card)
         scroll.setWidget(container)
         self.setCentralWidget(scroll)
@@ -1162,7 +1239,7 @@ class MainWindow(QMainWindow):
                 # 増えた分だけ新しいシリンダー入力行を追加します
                 for _ in range(new_count - current_count):
                     unit = CylinderUnit(self._get_item_no, self._get_cylinder_candidates)
-                    self.cylinder_layout.addWidget(unit)
+                    self.cylinder_units_layout.addWidget(unit)
                     self.cylinder_units.append(unit)
             else:
                 # 減った分だけ後ろから入力行を削除します
@@ -1238,7 +1315,7 @@ class MainWindow(QMainWindow):
         for _ in range(removal_count):
             unit = self.cylinder_units.pop()
             # レイアウトから取り外し、ウィジェットを破棄します
-            self.cylinder_layout.removeWidget(unit)
+            self.cylinder_units_layout.removeWidget(unit)
             unit.deleteLater()
 
     def _refresh_first_color_signal(self) -> None:
