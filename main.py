@@ -1069,12 +1069,75 @@ class MainWindow(QMainWindow):
         wrap.setSpacing(16)
 
         self.grid = QGridLayout()
+        self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setHorizontalSpacing(16)
         self.grid.setVerticalSpacing(12)
         ncols = int(self.config.get("grid_columns", 4))
         for i in range(ncols * 2):
             stretch = 1 if i % 2 == 1 else 0
             self.grid.setColumnStretch(i, stretch)
+
+        # 初学者にもわかる説明：上部の入力欄全体をカード状にまとめ、シリンダー登録と同じ雰囲気にそろえます。
+        self.form_card = Card()
+        self.form_card.setProperty("variant", "section")
+        self.form_card.style().unpolish(self.form_card)
+        self.form_card.style().polish(self.form_card)
+
+        # 初学者にもわかる説明：カード内に余白付きのレイアウトを用意し、後でヘッダーと入力欄を積み上げます。
+        self.form_layout = QVBoxLayout(self.form_card)
+        self.form_layout.setContentsMargins(20, 16, 20, 20)
+        self.form_layout.setSpacing(16)
+
+        # 初学者にもわかる説明：入力セクションのタイトル帯を作り、薄いアクセント色で区切ります。
+        form_header_frame = QFrame()
+        form_header_frame.setObjectName("formHeader")
+        form_header_frame.setStyleSheet("""
+            QFrame#formHeader {
+                background: rgba(41,98,255,0.10);
+                border-radius: 8px;
+            }
+            QFrame#formHeader QLabel {
+                color: #1A237E;
+                font-weight: 600;
+            }
+        """)
+        form_header_layout = QHBoxLayout(form_header_frame)
+        form_header_layout.setContentsMargins(12, 10, 12, 10)
+        form_header_layout.setSpacing(12)
+
+        # 初学者にもわかる説明：タイトルと補足説明を並べ、入力場所の意味が伝わるようにします。
+        form_header_texts = QVBoxLayout()
+        form_header_texts.setContentsMargins(0, 0, 0, 0)
+        form_header_texts.setSpacing(2)
+        header_title = QLabel("受注情報入力")
+        header_title.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        header_subtitle = QLabel("受注データの基本項目を入力してください。")
+        header_subtitle.setStyleSheet("color:#3F51B5; font-size:12px;")
+        form_header_texts.addWidget(header_title)
+        form_header_texts.addWidget(header_subtitle)
+        form_header_layout.addLayout(form_header_texts)
+        form_header_layout.addStretch(1)
+        self.form_layout.addWidget(form_header_frame)
+
+        # 初学者にもわかる説明：入力欄を包むフレームを用意し、白い背景と角丸で浮いて見えるようにします。
+        self.form_body = QFrame()
+        self.form_body.setObjectName("formBody")
+        self.form_body.setStyleSheet("""
+            QFrame#formBody {
+                background: #FFFFFF;
+                border-radius: 12px;
+                border: 1px solid rgba(41,98,255,0.16);
+            }
+            QFrame#formBody QLabel {
+                color: #1F2937;
+                font-weight: 600;
+            }
+        """)
+        self.form_body_layout = QVBoxLayout(self.form_body)
+        self.form_body_layout.setContentsMargins(16, 20, 16, 16)
+        self.form_body_layout.setSpacing(12)
+        self.form_body_layout.addLayout(self.grid)
+        self.form_layout.addWidget(self.form_body)
 
         self.widgets: Dict[str, QtWidgets.QWidget] = {}
         self.save_button: Optional[QPushButton] = None
@@ -1148,7 +1211,9 @@ class MainWindow(QMainWindow):
         # 先頭の色番号コンボがどれかを覚えて、不要な二重接続を避けます
         self._first_order_combo: Optional[QComboBox] = None
 
-        wrap.addLayout(self.grid)
+        # 初学者にもわかる説明：整えたカードをメインレイアウトへ追加し、上部フォームの見た目を統一します。
+        wrap.addWidget(self.form_card)
+        wrap.addSpacing(8)
         wrap.addWidget(self.cyl_title)
         wrap.addWidget(self.cylinder_card)
         root.addWidget(self.card)
@@ -1185,7 +1250,10 @@ class MainWindow(QMainWindow):
                 key = f.get("key", label_text)
 
                 lbl = QLabel(label_text)
-                lbl.setStyleSheet(f"color:#333; font-size:{font_size}px;")
+                # 初学者にもわかる説明：ラベルの文字色と太さを整え、カードの雰囲気に合わせます。
+                lbl.setStyleSheet(
+                    f"color:#1F2937; font-weight:600; font-size:{font_size}px;"
+                )
                 self.grid.addWidget(lbl, row, grid_col_label)
 
                 if ftype == "text":
@@ -1217,23 +1285,26 @@ class MainWindow(QMainWindow):
                         edit.setValidator(v)
                         edit.setInputMethodHints(QtCore.Qt.ImhPreferNumbers)
 
+                # 初学者にもわかる説明：入力欄の余白や色を整え、シリンダー欄と同じ質感にします。
                 edit.setStyleSheet(f"""
                     QLineEdit {{
-                        padding: 8px 10px;
-                        border-radius: 8px;
-                        border:1px solid rgba(0,0,0,0.15);
-                        background:#FAFAFA;
+                        padding: 10px 12px;
+                        border-radius: 10px;
+                        border:1px solid rgba(41,98,255,0.16);
+                        background:#FFFFFF;
                         font-size:{font_size}px;
+                        color:#1F2937;
                     }}
                     QPlainTextEdit {{
-                        padding: 10px;
-                        border-radius: 10px;
-                        border:1px solid rgba(0,0,0,0.15);
-                        background:#FAFAFA;
+                        padding: 12px;
+                        border-radius: 12px;
+                        border:1px solid rgba(41,98,255,0.16);
+                        background:#FFFFFF;
                         font-size:{font_size}px;
+                        color:#1F2937;
                     }}
                     QLineEdit:focus, QPlainTextEdit:focus {{
-                        border:1.4px solid #2962FF;
+                        border:1.6px solid #2962FF;
                         background:#FFFFFF;
                     }}
                 """)
